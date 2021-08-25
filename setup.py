@@ -20,6 +20,7 @@ from setuptools import setup
 setup(
     name="pxdgen",
     version="1.0.0",
+    url="https://github.com/earowley/pxdgen",
     py_modules=["_pxdgen"],
     packages=["pxdgen", "pxdgen.clang", "pxdgen.utils"],
     package_dir={
@@ -29,7 +30,6 @@ setup(
     entry_points={
         "console_scripts": ["pxdgen = _pxdgen:main"]
     },
-    url='',
     license="GNU GPLv3",
     author="Eric Rowley",
     author_email="earowley23@gmail.com",

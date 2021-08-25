@@ -94,7 +94,7 @@ There are more C stdlib examples in the examples folder. Each wraps the C standa
 
 + [Clang](https://releases.llvm.org/download.html) - Make sure libclang is on your $PATH, or direct pxdgen to the correct path with -L.
 
-## Installation or Getting Started
+## Installation
 
     pip install pxdgen
 
