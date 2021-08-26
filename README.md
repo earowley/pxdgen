@@ -2,6 +2,14 @@
 
 PxdGen is a tool which uses Clang to convert C/C++ header files to Cython pxd files. It has two modes of operation: single-file mode and directory mode. Single file mode is well suited for C/C++ libraries that consolodate all definitions into a single header, while directory mode is better suited for large projects with many independent headers. There are examples of each in the examples folder.
 
+## Installation
+
+    pip install pxdgen
+    
+## Requirements
+
++ [Clang](https://releases.llvm.org/download.html) - Make sure libclang is on your $PATH, or direct pxdgen to the correct path with -L.
+
 ## Simple Example
 
 Below would be a simple way to use string.h functions from Cython (assuming Cython's libc.string did not exist):
@@ -89,14 +97,6 @@ To use:
     >>>
     
 There are more C stdlib examples in the examples folder. Each wraps the C standard library without the use of Cython's libc.*.
-
-## Requirements
-
-+ [Clang](https://releases.llvm.org/download.html) - Make sure libclang is on your $PATH, or direct pxdgen to the correct path with -L.
-
-## Installation
-
-    pip install pxdgen
 
 ## Bugs/Limitations
 
