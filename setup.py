@@ -17,9 +17,13 @@
 from setuptools import setup
 
 
+with open("./README.md", 'r') as file:
+    long_d = file.read()
+
+
 setup(
     name="pxdgen",
-    version="1.0.0",
+    version="1.0.1",
     url="https://github.com/earowley/pxdgen",
     py_modules=["_pxdgen"],
     packages=["pxdgen", "pxdgen.clang", "pxdgen.utils"],
@@ -34,6 +38,8 @@ setup(
     author="Eric Rowley",
     author_email="earowley23@gmail.com",
     description="A tool for converting one or more C/C++ headers to Cython header files.",
+    long_description=long_d,
+    long_description_content_type="text/markdown",
     install_requires=[
         "clang",
         "colorama"
