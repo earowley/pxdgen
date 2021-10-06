@@ -132,19 +132,21 @@ class TypeResolver:
         @param import_path: The current import path.
         @return: List of tuples containing (old,new) type strings, where new is valid after import.
         """
+        # Package paths for which imports are ignored
+        IGNORE_IMPORTS = ('$',)
         ret = list()
         for type_string in types:
             if type_string in TypeResolver.BUILTINS:
                 continue
             p_type = self.known_types.get(type_string, None)
-            if p_type and p_type.package_path != import_path:
-                if p_type.package_path != '$':
+            if p_type:
+                if p_type.package_path not in IGNORE_IMPORTS and p_type.package_path != import_path:
                     self.imports.add(p_type.import_string)
                 ret.append((type_string, p_type.basename))
                 continue
             p_type = self.known_types.get("::".join((current_namespace, type_string)), None)
-            if p_type and p_type.package_path != import_path:
-                if p_type.package_path != '$':
+            if p_type:
+                if p_type.package_path not in IGNORE_IMPORTS and p_type.package_path != import_path:
                     self.imports.add(p_type.import_string)
                 ret.append((type_string, p_type.basename))
                 continue

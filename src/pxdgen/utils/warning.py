@@ -15,7 +15,7 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import colorama
-
+import clang.cindex
 
 _WARNING_LEVEL = 0
 
