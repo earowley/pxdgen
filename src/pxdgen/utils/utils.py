@@ -243,6 +243,42 @@ def sanitize_type_string(s: str) -> str:
     return s.strip()
 
 
+def nested_template_type_strings(s: str) -> list:
+    """
+    The purpose of this function is to extract
+    the type strings of nested template values.
+    sanitize_type_string omits these. For example,
+    in:
+
+    Foo[Bar[Baz[int]]]
+
+    We would need to resolve Foo, Bar, Baz, and int.
+    However, sanitize_type_string only extracts Foo
+    """
+    OB = '<'
+    CB = '>'
+    sq_brackets = list()
+    op_brackets = list()
+    ret = list()
+
+    for i, v in enumerate(s):
+        if v == OB:
+            op_brackets.append(i)
+        elif v == CB and len(op_brackets) > 0:
+            sq_brackets.append((op_brackets.pop(), i))
+
+    for start, end in sq_brackets:
+        nested = s[start+1:end]
+        next_ob = nested.find(OB)
+
+        if next_ob == -1:
+            ret.append(nested)
+        else:
+            ret.append(nested[:next_ob])
+
+    return ret
+
+
 def convert_dialect(s: str, bool_replace: bool = False) -> str:
     """
     Converts C++ dialect string to Cython dialect

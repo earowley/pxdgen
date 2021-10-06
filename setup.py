@@ -41,7 +41,7 @@ setup(
     long_description=long_d,
     long_description_content_type="text/markdown",
     install_requires=[
-        "clang",
+        "libclang",
         "colorama"
     ],
     python_requires="~=3.6"

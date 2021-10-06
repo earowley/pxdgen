@@ -23,6 +23,7 @@ from .typedefs import Typedef
 from .functions import Function
 from .atomic import Member
 from ..constants import TAB
+from ..config import Setting, get_config
 from ..utils import TypeResolver, is_cppclass, warning
 
 
@@ -148,8 +149,9 @@ class Namespace:
                 if not child.spelling:
                     unk.append(child)
                     continue
+                s = Struct(child)
                 resolver.add_user_defined_type(self._cpp_qual_name(child.spelling), self.package_path)
-                for t in Struct(child).ctypes:
+                for t in s.ctypes:
                     resolver.process_type(t, self.cpp_name)
             elif child.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
                 typedef = Typedef(child)
@@ -191,8 +193,11 @@ class Namespace:
                 if not child.spelling:
                     unk.append(child)
                     continue
-                ctypes = Struct(child).ctypes
-                for i in Namespace._gen_struct_enum(child, Struct, False):
+                s = Struct(child)
+                ctypes = s.ctypes
+                struct_iter = Namespace._gen_struct_enum(child, Struct, False)
+                yield next(struct_iter)
+                for i in struct_iter:
                     yield self._replace_typenames(i, ctypes, resolver)
             elif child.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
                 typedef = Typedef(child)
@@ -204,7 +209,9 @@ class Namespace:
                             yield i
                     else:
                         ctypes = Struct(base).ctypes
-                        for i in Namespace._gen_struct_enum(base, Struct, True, name=child.spelling):
+                        struct_iter = Namespace._gen_struct_enum(base, Struct, True, name=child.spelling)
+                        yield next(struct_iter)
+                        for i in struct_iter:
                             yield self._replace_typenames(i, ctypes, resolver)
                     unk.remove(base)
                     continue
@@ -258,6 +265,8 @@ class Namespace:
         if self.class_space and child.kind in PREFER_INSTANCE:
             return False
         if self.class_space and child.access_specifier == clang.cindex.AccessSpecifier.PRIVATE:
+            return False
+        if child.kind in Namespace.CLASS_TYPES and Struct(child).is_forward_decl and not get_config(Setting.FORWARD_DECL):
             return False
         try:
             return (

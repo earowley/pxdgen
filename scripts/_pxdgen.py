@@ -22,6 +22,7 @@ import clang.cindex
 import pxdgen.utils
 import glob
 import pxdgen.utils.warning as warnings
+from pxdgen.config import set_config, Setting
 from pxdgen.utils import TypeResolver
 from pxdgen.utils import TabWriter
 from pxdgen.clang.namespaces import Namespace
@@ -29,6 +30,7 @@ from pxdgen.clang.namespaces import Namespace
 
 FLAG_NOIMPORT = "noimport"
 FLAG_AUTODEFINE = "autodefine"
+FLAG_FORWARD_DECL = "emitfwdecl"
 
 
 class PXDGen:
@@ -71,6 +73,10 @@ class PXDGen:
         self.clang_args = clang_args
         self.opts = program_options
         self.flags = set(program_options.flags)
+        
+        if FLAG_FORWARD_DECL in self.flags:
+            set_config(Setting.FORWARD_DECL)
+
         warnings.set_warning_level(program_options.warning_level)
 
     def run(self):

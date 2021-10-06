@@ -75,7 +75,8 @@ class Struct:
 
         @return: Boolean.
         """
-        return self.cursor.get_definition() is None
+        children = [c for c in self.cursor.get_children() if c.kind in Struct.VALID_KINDS]
+        return self.cursor.get_definition() is None or len(children) == 0
 
     @property
     def ctypes(self) -> list:
