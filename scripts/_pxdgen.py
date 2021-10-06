@@ -20,15 +20,24 @@ import os
 import os.path
 import clang.cindex
 import pxdgen.utils
-import pxdgen.utils.settings
 import glob
+import pxdgen.utils.warning as warnings
 from pxdgen.utils import TypeResolver
 from pxdgen.utils import TabWriter
 from pxdgen.clang.namespaces import Namespace
 
 
+FLAG_NOIMPORT = "noimport"
+FLAG_AUTODEFINE = "autodefine"
+
+
 class PXDGen:
     def __init__(self, program_options: argparse.Namespace):
+        """
+        Main class for PxdGen supplementary script. CLI implementation.
+
+        @param program_options: Options supplied to CLI.
+        """
         if not program_options.directory and not os.path.isfile(program_options.header):
             exit("Unable to find input file '%s'" % program_options.header)
 
@@ -61,8 +70,15 @@ class PXDGen:
 
         self.clang_args = clang_args
         self.opts = program_options
+        self.flags = set(program_options.flags)
+        warnings.set_warning_level(program_options.warning_level)
 
     def run(self):
+        """
+        Run the program with parameters supplied in constructor.
+
+        @return: None.
+        """
         if self.opts.directory:
             self._run_directory()
         else:
@@ -80,17 +96,18 @@ class PXDGen:
             valid_headers |= {os.path.basename(g) for g in glob.glob(self.opts.headers)}
 
         for key, value in namespaces.items():
-            namespaces[key] = Namespace(value, self.opts.recursive and not self.opts.headers, key, os.path.basename(self.opts.header), valid_headers)
+            ns = Namespace(value, self.opts.recursive and not self.opts.headers, key, os.path.basename(self.opts.header), valid_headers)
+            ns.process_types(resolver)
+            namespaces[key] = ns
 
-        for namespace in namespaces.values():
-            namespace.process_types(resolver)
-
-        PXDGen._process_namespaces(namespaces, resolver, stream)
+        resolver.warn_unknown_types()
+        self._process_namespaces(namespaces, resolver, stream)
         stream.close()
 
     def _run_directory(self):
         self.base_import_dir = os.path.join(self.opts.header, "..")
         resolver = self._get_directory_resolver(self.opts.header)
+        resolver.warn_unknown_types()
         self._process_directory(self.opts.header, resolver)
 
     def _process_directory(self, dirname: str, resolver: TypeResolver):
@@ -121,13 +138,11 @@ class PXDGen:
         for key, value in namespaces.items():
             namespaces[key] = Namespace(value, False, key, rip, {os.path.basename(input_file)}, package_path=import_path)
 
-        PXDGen._process_namespaces(namespaces, resolver, stream)
+        self._process_namespaces(namespaces, resolver, stream)
         stream.close()
 
-    @staticmethod
-    def _process_namespaces(namespaces: dict, resolver: TypeResolver, stream):
+    def _process_namespaces(self, namespaces: dict, resolver: TypeResolver, stream):
         writer = TabWriter()
-        flags = pxdgen.utils.settings.FLAGS
 
         for namespace in namespaces.values():
             if namespace.has_declarations:
@@ -140,11 +155,11 @@ class PXDGen:
                 writer.unindent()
                 writer.writeline('\n')
 
-        if resolver.imports and not flags["noimport"]:
+        if resolver.imports and FLAG_NOIMPORT not in self.flags:
             stream.write("#  PXDGEN IMPORTS\n")
             stream.write('\n'.join(resolver.drain_imports()))
             stream.write('\n\n')
-        if resolver.unknown_imports and flags["autodefine"]:
+        if resolver.unknown_imports and FLAG_AUTODEFINE in self.flags:
             stream.write("#  PXDGEN AUTO-DEFINED TYPES\n")
             stream.write("cdef extern from *:\n")
             for pt in resolver.drain_unknown_imports():
@@ -181,6 +196,11 @@ class PXDGen:
 
 
 def main():
+    """
+    Entry point for PxdGen CLI.
+
+    @return: None
+    """
     args = sys.argv[1:]
 
     argp = argparse.ArgumentParser(description="Converts a C/C++ header file to a pxd file")
@@ -216,8 +236,5 @@ def main():
                       help="Set a pxdgen flag to further tune the program output")
 
     opts = argp.parse_args(args)
-    for flag in opts.flags:
-        pxdgen.utils.settings.FLAGS[flag] = True
-    pxdgen.utils.settings.WARNING_LEVEL = opts.warning_level
     proc = PXDGen(opts)
     proc.run()

@@ -14,9 +14,5 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-WARNING_LEVEL = 0
-
-FLAGS = {
-    "noimport": False,  # Disable all automatic importing
-    "autodefine": False
-}
+TAB_LENGTH = 4
+TAB = ' ' * TAB_LENGTH

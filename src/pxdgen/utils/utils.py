@@ -15,43 +15,31 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import clang.cindex
-import colorama
-from . import settings
 
 
-def find_all(cursors: list, kind: clang.cindex.CursorKind):
+def is_cppclass(cursor: clang.cindex.Cursor) -> bool:
     """
-    Searches through cursors list and generates
-    all child cursors with the specified kind
-    :param cursors: List of cursors to search
-    :param kind: Kind to compare against cursor children
-    :return: clang.cindex.Cursor generator
-    """
-    for cursor in cursors:
-        for child in cursor.get_children():
-            if child.kind == kind:
-                yield child
+    Given a cursor to a struct/class/class template, returns whether the cursor
+    is a C++ class type.
 
-
-def is_cppclass(cursor: clang.cindex.Cursor):
-    """
-    Determines whether a clang cursor represents a C++ class.
-    Needed to distinguish from C structs since C++ classes can
-    resolve to their own namespaces containing static methods...
-    with or without fields/methods.
+    @param cursor: Clang Cursor.
+    @return: Boolean.
     """
     # There can be anonymous structs and enumerations as fields
-    CTYPES = (clang.cindex.CursorKind.FIELD_DECL, clang.cindex.CursorKind.STRUCT_DECL, clang.cindex.CursorKind.ENUM_DECL, clang.cindex.CursorKind.UNION_DECL)
-    return cursor.kind != clang.cindex.CursorKind.STRUCT_DECL or any((mem.kind not in CTYPES for mem in cursor.get_children()))
+    # CTYPES = (clang.cindex.CursorKind.FIELD_DECL, clang.cindex.CursorKind.STRUCT_DECL, clang.cindex.CursorKind.ENUM_DECL, clang.cindex.CursorKind.UNION_DECL)
+    # return cursor.kind != clang.cindex.CursorKind.STRUCT_DECL or any((mem.kind not in CTYPES for mem in cursor.get_children()))
+    return cursor.kind in (clang.cindex.CursorKind.CLASS_DECL, clang.cindex.CursorKind.CLASS_TEMPLATE)
 
 
 def find_namespaces(cursor: clang.cindex.Cursor, curr_name='') -> dict:
     """
-    Generates a dictionary of namespace: [cursors] items. Generally
-    the cursor should be a Translation Unit.
-    :param cursor: Toplevel cursor, normally translation unit.
-    :param curr_name: For recursion, leave blank
-    :return: dict: Example {"a::b::c": [cursor1, cursor2]}
+    Finds namespaces, given the top-level cursor of a header file.
+    @param cursor: Clang Cursor.
+    @param curr_name: Recursive helper, leave as-is.
+    @return: Dictionary in the following form:
+    {
+        "A::B::C": [clang.cindex.Cursor c1, clang.cindex.Cursor c2 ...]
+    }
     """
 
     def _update(d1, d2):
@@ -90,9 +78,10 @@ def find_namespaces(cursor: clang.cindex.Cursor, curr_name='') -> dict:
 
 def is_function_pointer(ctype: clang.cindex.Type) -> bool:
     """
-    Returns whether the clang.cindex.Type represents a function pointer
-    :param ctype: Any clang.cindex.Type type
-    :return: bool
+    Returns whether the type represents a function pointer.
+
+    @param ctype: Any Clang Type object.
+    @return: Boolean.
     """
     if ctype.kind != clang.cindex.TypeKind.POINTER:
         return False
@@ -102,18 +91,22 @@ def is_function_pointer(ctype: clang.cindex.Type) -> bool:
 
 def get_function_pointer_return_type(ctype: clang.cindex.Type) -> str:
     """
-    Returns the return type of a function pointer. The type
-    is not verified to be a function pointer. Use is_function_pointer
-    to check before calling this function.
+    Gets the return type of a function pointer. Type is not validated,
+    use is_function_pointer to validate.
+
+    @param ctype: Clang Type object.
+    @return: str.
     """
     return ctype.get_pointee().get_result().spelling
 
 
-def get_function_pointer_arg_types(ctype: clang.cindex.Type):
+def get_function_pointer_arg_types(ctype: clang.cindex.Type) -> list:
     """
-    Returns the arg types of a function pointer. The type
-    is not verified to be a function pointer. Use is_function_pointer
-    to check before calling this function.
+    Gets the argument types of a function pointer. Type is not validated,
+    use is_function_pointer to validate.
+
+    @param ctype: Clang Type object.
+    @return: list.
     """
     return [arg.spelling for arg in ctype.get_pointee().argument_types()]
 
@@ -121,9 +114,10 @@ def get_function_pointer_arg_types(ctype: clang.cindex.Type):
 def get_template_params(cursor: clang.cindex.Cursor) -> str:
     """
     Returns the Cython string representing template parameters
-    of a clang.cindex.Cursor
-    :param cursor: Any clang.cindex.Cursor
-    :return: Cython template string, like [T, U]
+    of a Cursor.
+
+    @param cursor: Any Cursor.
+    @return: Cython template string, like [T, U].
     """
     VALID = (
         clang.cindex.CursorKind.TEMPLATE_TYPE_PARAMETER,
@@ -144,9 +138,10 @@ def get_template_params(cursor: clang.cindex.Cursor) -> str:
 def get_template_params_as_list(cursor: clang.cindex.Cursor) -> list:
     """
     Returns a list containing template parameters
-    of a clang.cindex.Cursor
-    :param cursor: Any clang.cindex.Cursor
-    :return: A Python list like [T, U]
+    of a Cursor.
+
+    @param cursor: Any Cursor.
+    @return: A Python list like [T, U].
     """
     VALID = (
         clang.cindex.CursorKind.TEMPLATE_TYPE_PARAMETER,
@@ -156,83 +151,22 @@ def get_template_params_as_list(cursor: clang.cindex.Cursor) -> list:
     return [c.spelling for c in cursor.get_children() if c.kind in VALID]
 
 
-def warn(message: str, warning_level: int = 1):
-    """
-    Emits a warning message, or does nothing based on
-    .settings.WARNING_LEVEL
-    """
-    if warning_level <= settings.WARNING_LEVEL:
-        print(colorama.Fore.YELLOW + "[Warning] " + colorama.Fore.RESET + message)
-
-
-def warn_unsupported(parent: clang.cindex.Cursor, unsupported_type: clang.cindex.CursorKind):
-    """
-    Warns when the main script encounters an unsupported C/C++ declaration.
-    Uses warning level 2.
-    """
-    try:
-        file_loc = parent.location.file.name
-    except AttributeError:
-        file_loc = "undefined"
-
-    warn("Unsupported type '%s' found in %s %s, file %s" % (
-        unsupported_type.name,
-        parent.kind.name,
-        parent.spelling,
-        file_loc
-    ), warning_level=2)
-
-
-def next_cpp_identifier(s: str) -> str:
-    """
-    Finds a cpp path-like identifier in the
-    input string. For example in the string
-    A::B::C foo(int a, int b) {,
-    'A::B::C' would be returned.
-
-    Old function - not used in the main script
-    any more.
-    """
-    # [ and ] in case a generic Cython string is passed
-    NS_TERMINATORS = {' ', ',', '<', '>', '(', ')', '[', ']'}
-    sep_ind = s.find("::")
-
-    if sep_ind == -1:
-        return ''
-
-    for i in range(sep_ind-1, -1, -1):
-        if s[i] in NS_TERMINATORS:
-            ns_start = i + 1
-            break
-    else:
-        ns_start = 0
-
-    for i in range(sep_ind+2, len(s)):
-        if s[i] in NS_TERMINATORS:
-            ns_end = i
-            break
-    else:
-        ns_end = len(s)
-
-    return s[ns_start:ns_end]
-
-
 def strip_type_ids(cursor: clang.cindex.Cursor) -> str:
     """
-    Returns the type represented by cursor with
-    type identifiers stripped. In C, a struct
-    referred to as 'struct foo' would always
-    be referred to as 'foo' in Cython
+    Safest method of stripping type strings, but requires a Cursor object
+    for introspection. Strips type strings of 'struct', 'enum', and 'union'.
+
+    @param cursor: Clang Cursor.
+    @return: str.
     """
     type_spelling = cursor.type.spelling
-    kinds = clang.cindex.CursorKind
     replacement = ''
 
-    if cursor.kind == kinds.STRUCT_DECL:
+    if cursor.kind == clang.cindex.CursorKind.STRUCT_DECL:
         replacement = "struct"
-    elif cursor.kind == kinds.ENUM_DECL:
+    elif cursor.kind == clang.cindex.CursorKind.ENUM_DECL:
         replacement = "enum"
-    elif cursor.kind == kinds.UNION_DECL:
+    elif cursor.kind == clang.cindex.CursorKind.UNION_DECL:
         replacement = "union"
 
     if replacement:
@@ -243,16 +177,22 @@ def strip_type_ids(cursor: clang.cindex.Cursor) -> str:
 
 def strip_all_type_ids(s: str) -> str:
     """
-    Directly replaces all type ids. Caused issues
-    in convert_dialect, so its logic was split here.
+    Deletes all instances of 'struct', 'enum' and 'union' in the type string.
+    Can cause issues if the type name has the words in them.
+
+    @param s: Type string to strip.
+    @return: Stripped type string.
     """
     return s.replace("struct ", '').replace("enum ", '').replace("union ", '')
 
 
 def strip_beg_type_ids(s: str) -> str:
     """
-    Removes a type id that exists only
-    at the start of s
+    Deletes instances of 'struct', 'enum', and 'union' that exist at the
+    beginning of the type string s.
+
+    @param s: Type string to strip.
+    @return: Stripped type string.
     """
     IDS = ("struct ", "enum ", "union ")
 
@@ -272,6 +212,9 @@ def sanitize_type_string(s: str) -> str:
     Prepares a type string for submission to resolver.
     Removes extraneous adjectives from C builtin types
     like signedness and remove generic information.
+
+    @param s: Input type string.
+    @return: Sanitized type string.
     """
     s = s.replace("unsigned ", '').replace("signed ", '').replace("const ", '').replace("volatile ", '')
     s = strip_beg_type_ids(s)
@@ -286,11 +229,18 @@ def sanitize_type_string(s: str) -> str:
     except ValueError:
         pass
 
+    i_ptr = s.find('*')
+
     # Removing after * will also remove >C99 restrict
-    try:
-        return s[:s.index('*')].strip()
-    except ValueError:
-        return s.strip()
+    if i_ptr != -1:
+        s = s[:i_ptr]
+
+    i_ref = s.find('&')
+
+    if i_ref != -1:
+        s = s[:i_ref]
+
+    return s.strip()
 
 
 def convert_dialect(s: str, bool_replace: bool = False) -> str:
@@ -298,9 +248,10 @@ def convert_dialect(s: str, bool_replace: bool = False) -> str:
     Converts C++ dialect string to Cython dialect
     string. Replaces template delimiters and removes
     some names that are valid in C(++) but not Cython
-    :param s: String to convert
-    :param bool_replace: replace any instance of bool with bint
-    :return: Converted string
+
+    @param s: String to convert
+    @param bool_replace: replace any instance of bool with bint
+    @return: Converted string
     """
     THROWS = "throw("
 

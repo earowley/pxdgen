@@ -20,6 +20,7 @@ from .atomic import Member
 from .typedefs import Typedef
 from .functions import Function, Constructor
 from .. import utils
+from ..utils import warning
 
 
 class Struct:
@@ -46,41 +47,50 @@ class Struct:
         )
     )
 
-    def __init__(self, cursor: clang.cindex.Cursor, *args,
+    def __init__(self, cursor: clang.cindex.Cursor, *_,
                  name: str = ''):
+        """
+        Represents a Cython struct/cppclass, given the correct
+        Clang Cursor.
+
+        @param cursor: Clang struct/cppclass Cursor.
+        @param name: Name override in the case that spelling is empty.
+        """
         self.cursor = cursor
         self.name = name or self.cursor.spelling
 
     @property
     def is_cppclass(self) -> bool:
         """
-        Wrapper for utils.is_cppclass. Returns
-        whether this structure is a cppclass.
+        Whether this is a C++ class or POD C struct.
+
+        @return: Boolean.
         """
         return utils.is_cppclass(self.cursor)
 
     @property
     def is_forward_decl(self) -> bool:
         """
-        Used to ignore certain declarations which are
-        not needed.
+        Whether this class is a forward declaration.
+
+        @return: Boolean.
         """
-        return isinstance(self.cursor.get_definition(), type(None))
+        return self.cursor.get_definition() is None
 
     @property
     def ctypes(self) -> list:
         """
-        Returns the types used in this struct delaration, including
-        each field. If the struct uses templates, the generic types
-        are filtered out.
+        A list of sanitized type strings for this struct.
+
+        @return: List.
         """
         ret = list()
         template_params = utils.get_template_params_as_list(self.cursor)
 
         for child in self.cursor.get_children():
+            if child.access_specifier == clang.cindex.AccessSpecifier.PRIVATE:
+                continue
             if child.kind in Struct.INSTANCE_TYPES:
-                if child.access_specifier == clang.cindex.AccessSpecifier.PRIVATE:
-                    continue
                 if child.kind == clang.cindex.CursorKind.FIELD_DECL:
                     ret += Member(child).ctypes
                 elif child.kind in (clang.cindex.CursorKind.CXX_METHOD, clang.cindex.CursorKind.FUNCTION_TEMPLATE):
@@ -94,6 +104,42 @@ class Struct:
             return list(filter(lambda p: p not in template_params, ret))
 
         return ret
+
+    def cython_header(self, typedef: bool) -> str:
+        """
+        The Cython header for this struct/class.
+
+        @param typedef: Whether this should be printed as a typedef.
+        @return: str.
+        """
+        return "%s%s %s%s:" % (
+            "ctypedef " if typedef and not self.is_cppclass else '',
+            "cppclass" if self.is_cppclass else "struct",
+            self.name,
+            utils.get_template_params(self.cursor)
+        )
+
+    def members(self) -> Generator[str, None, None]:
+        """
+        Iterates over the Cython member declarations of this struct/class.
+
+        @return: Generator[str].
+        """
+        gen = 0
+        for child in self.cursor.get_children():
+            if child.kind in Struct.INSTANCE_TYPES:
+                if child.access_specifier == clang.cindex.AccessSpecifier.PRIVATE:
+                    continue
+                if child.is_static_method():
+                    #  Handle static methods on instance side - Cython allows
+                    yield "@staticmethod"
+                gen += 1
+                yield self._instance_member_repr(child)
+            elif child.kind not in Struct.VALID_KINDS:
+                warning.warn_unsupported(self.cursor, child.kind)
+
+        if not gen:
+            yield "pass"
 
     def _instance_member_repr(self, child: clang.cindex.Cursor):
         """
@@ -119,37 +165,3 @@ class Struct:
             return Constructor(child).declaration
         elif child.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
             return Typedef(child).declaration
-
-    def cython_header(self, typedef: bool) -> str:
-        """
-        Returns the Cython declaration for this struct (C) or struct/class (C++).
-        :param typedef: Whether or not this is a ctypedef
-        :return: The Cython declaration, for example 'ctypedef enum Foo:'
-        """
-        return "%s%s %s%s:" % (
-            "ctypedef " if typedef and not self.is_cppclass else '',
-            "cppclass" if self.is_cppclass else "struct",
-            self.name,
-            utils.get_template_params(self.cursor)
-        )
-
-    def members(self) -> Generator[str, None, None]:
-        """
-        Yields the instance member lines of this struct
-        or C++ class.
-        """
-        gen = 0
-        for child in self.cursor.get_children():
-            if child.kind in Struct.INSTANCE_TYPES:
-                if child.access_specifier == clang.cindex.AccessSpecifier.PRIVATE:
-                    continue
-                if child.is_static_method():
-                    #  Handle static methods on instance side - Cython allows
-                    yield "@staticmethod"
-                gen += 1
-                yield self._instance_member_repr(child)
-            elif child.kind not in Struct.VALID_KINDS:
-                utils.warn_unsupported(self.cursor, child.kind)
-
-        if not gen:
-            yield "pass"

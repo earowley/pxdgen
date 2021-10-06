@@ -15,21 +15,28 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import clang.cindex
-from .. import utils
+from ..utils import warning
 from typing import Generator
 
 
 class Enumeration:
-    def __init__(self, cursor: clang.cindex.Cursor, *args,
+    def __init__(self, cursor: clang.cindex.Cursor, *_,
                  name: str = ''):
+        """
+        Represents an enum, given an enum Cursor.
+
+        @param cursor: Clang cursor.
+        @param name: Name override in the case that the spelling is empty
+        """
         self.cursor = cursor
         self.name = name or self.cursor.spelling
 
     def cython_header(self, typedef: bool) -> str:
         """
-        Returns the Cython declaration for this enum.
-        :param typedef: Whether or not this is a ctypedef
-        :return: The Cython declaration, for example 'ctypedef enum Foo:'
+        The Cython header declaration for this enum.
+
+        @param typedef: Whether this is a typedef'd enum.
+        @return: str.
         """
         return "%senum %s:" % (
             "ctypedef " if typedef else '',
@@ -38,10 +45,9 @@ class Enumeration:
 
     def members(self) -> Generator[str, None, None]:
         """
-        Generator that yields the enumeration members.
-        Does not tab over, and strings do not end with
-        newlines.
-        :return: Generator of member strings
+        Iterator over the members of this enum.
+
+        @return: Generator[str, None, None]
         """
         gen = 0
         for enum in self.cursor.get_children():
@@ -49,7 +55,7 @@ class Enumeration:
                 gen += 1
                 yield "%s = %s" % (enum.spelling, enum.enum_value)
             else:
-                utils.warn_unsupported(self.cursor, enum.kind)
+                warning.warn_unsupported(self.cursor, enum.kind)
 
         if not gen:
             yield "pass"

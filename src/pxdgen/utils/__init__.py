@@ -17,6 +17,3 @@
 from .utils import *
 from .tab_writer import *
 from .resolver import *
-
-TAB_LENGTH = 4
-TAB = ' ' * TAB_LENGTH

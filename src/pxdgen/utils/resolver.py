@@ -15,6 +15,7 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from typing import Generator
+from . import warning
 
 
 class TypeResolver:
@@ -72,8 +73,10 @@ class TypeResolver:
     def add_user_defined_type(self, type_string: str, import_string: str):
         """
         Adds a type and necessary import information to the type repository.
-        type_string should be the fully qualified C++ name, such as
-        A::B::C
+
+        @param type_string: fully qualified C++ name, such as 'A::B::C'.
+        @param import_string: Cython import string for automatic imports, such as 'A.B'.
+        @return: None
         """
         p_type = ProcessedType(type_string, import_string)
 
@@ -88,8 +91,13 @@ class TypeResolver:
         """
         Check a type to see if it is an existing type or builtin type.
         If not, add it to undefined types.
+
+        @param type_string: Type string to check.
+        @param current_namespace: The current namespace being parsed. Used to check local references.
+        @return: None
         """
         possible_cpp_name = "::".join((current_namespace, type_string)) if current_namespace else type_string
+
         if type_string in TypeResolver.BUILTINS:
             return
 
@@ -116,8 +124,13 @@ class TypeResolver:
 
     def add_imports_from_types(self, types: list, current_namespace: str, import_path: str) -> list:
         """
-        Given a list of strings containing type names, adds imports to the
+        Given a list of strings containing type names, adds necessary imports to the
         import repository. Imports are cleared and iterated via drain_imports.
+
+        @param types: List of type strings.
+        @param current_namespace: The current C++ namespace being parsed.
+        @param import_path: The current import path.
+        @return: List of tuples containing (old,new) type strings, where new is valid after import.
         """
         ret = list()
         for type_string in types:
@@ -136,21 +149,29 @@ class TypeResolver:
                 ret.append((type_string, p_type.basename))
                 continue
             p_type = self.unknown_types.get(type_string, None)
-            if p_type:
-                self.unknown_imports.add(p_type)
+            assert p_type is not None, "Type %s is not known or unknown" % type_string
+            self.unknown_imports.add(p_type)
+            unk_fallback = type_string
+            if current_namespace:
+                unk_fallback = unk_fallback.replace("%s::" % current_namespace, '')
+            ret.append((type_string, unk_fallback.replace("::", '.')))
 
         return ret
 
     def drain_imports(self) -> Generator[str, None, None]:
         """
-        Iterates and consumes imports.
+        Destructively iterates over import strings in repository.
+
+        @return: Generator[str].
         """
         while self.imports:
             yield self.imports.pop()
 
-    def drain_unknown_imports(self):
+    def drain_unknown_imports(self) -> Generator[str, None, None]:
         """
-        Iterates and consumes unknown types.
+        Destructively iterates over unknown import strings in repository.
+
+        @return: Generator[str].
         """
         while self.unknown_imports:
             yield self.unknown_imports.pop()
@@ -158,7 +179,8 @@ class TypeResolver:
     def update(self) -> int:
         """
         Removes unknown types that are now known.
-        Returns number of types resolved.
+
+        @return: Number of types resolved.
         """
         ret = 0
         for v in self.unknown_types:
@@ -167,6 +189,15 @@ class TypeResolver:
                 ret += 1
 
         return ret
+
+    def warn_unknown_types(self):
+        """
+        Warns of unknown types at warning level 1.
+
+        @return: None
+        """
+        for ut in self.unknown_types:
+            warning.warn("Unresolved type: %s" % ut)
 
 
 class ProcessedType:

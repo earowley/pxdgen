@@ -21,13 +21,20 @@ from .. import utils
 
 
 class Typedef:
-    def __init__(self, cursor: clang.cindex.Cursor, *args):
+    def __init__(self, cursor: clang.cindex.Cursor, *_):
+        """
+        Represents a typedef, given the correct Clang Cursor.
+
+        @param cursor: Clang typedef Cursor.
+        """
         self.cursor = cursor
 
     @property
     def declaration(self) -> str:
         """
-        Cython typedef declaration.
+        Cython declaration for this typedef.
+
+        @return: str.
         """
         tdtype = self.cursor.underlying_typedef_type
         spelling = utils.convert_dialect(tdtype.spelling).strip()
@@ -48,7 +55,11 @@ class Typedef:
     @property
     def base(self) -> Union[clang.cindex.Cursor, None]:
         """
-        The declaration that this typedef represents.
+        The Clang Cursor for the declaration of the type which
+        this typedef represents. If the declaration is not found,
+        None is returned.
+
+        @return: Union[clang.cindex.Cursor, None].
         """
         cursor = self.cursor
 
@@ -62,6 +73,8 @@ class Typedef:
     @property
     def ctypes(self) -> list:
         """
-        Types used in this typedef.
+        Sanitized type strings within this typedef.
+
+        @return: A list of type strings.
         """
         return Member.basic_member_ctypes(self.cursor.underlying_typedef_type)

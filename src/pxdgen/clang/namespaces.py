@@ -15,36 +15,168 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import clang.cindex
+import os
 from typing import Generator
 from .enums import Enumeration
 from .structs import Struct
 from .typedefs import Typedef
 from .functions import Function
-from .atomic import Space, Member
-from ..utils import TAB
-from ..utils import TypeResolver
+from .atomic import Member
+from ..constants import TAB
+from ..utils import TypeResolver, is_cppclass, warning
 
 
-class Namespace(Space):
+class Namespace:
+    # Used to determine which types are output/processed as functions
+    # Functions have their return type and argument types resolved
     FUNCTION_TYPES = (
         clang.cindex.CursorKind.FUNCTION_DECL, clang.cindex.CursorKind.FUNCTION_TEMPLATE
     )
 
+    # Determines what gets yielded as a struct or cppclass within this namespace
+    # C++ classes also resolve to namespaces, but they are resolved in utils.find_namespaces
+    CLASS_TYPES = (clang.cindex.CursorKind.STRUCT_DECL, clang.cindex.CursorKind.CLASS_DECL,
+                   clang.cindex.CursorKind.CLASS_TEMPLATE
+    )
+
+    # C++ classes are also processed as namespaces.
+    # These are cursors that will be encountered while processing,
+    # but should not emit warnings as they will not be ignored
+    # when the struct/cppclass is being emitted.
+    STATIC_IGNORED_TYPES = (
+        clang.cindex.CursorKind.NAMESPACE, clang.cindex.CursorKind.CXX_METHOD,
+        clang.cindex.CursorKind.FIELD_DECL, clang.cindex.CursorKind.CONSTRUCTOR,
+        clang.cindex.CursorKind.TEMPLATE_TYPE_PARAMETER,
+        clang.cindex.CursorKind.TEMPLATE_NON_TYPE_PARAMETER,
+        clang.cindex.CursorKind.TEMPLATE_TEMPLATE_PARAMETER
+    )
+
+    # All valid types. Convenient for fast warning determination
+    VALID_TYPES = (clang.cindex.CursorKind.ENUM_DECL,
+                   clang.cindex.CursorKind.TYPEDEF_DECL,
+                   clang.cindex.CursorKind.VAR_DECL
+    ) + FUNCTION_TYPES + CLASS_TYPES + STATIC_IGNORED_TYPES
+
     def __init__(self, cursors: list, recursive: bool, cpp_name: str,
-                 header_name: str, valid_headers: set, *args, package_path: str = ''):
-        super().__init__(cursors, recursive, cpp_name, header_name, valid_headers)
+                 header_name: str, valid_headers: set, *_, package_path: str = ''):
+        """
+        Represents a Cython namespace declaration, given the following parameters.
+
+        @param cursors: A list of cursors associated with this namespace.
+        @param recursive: Whether this namespace should declare children from other headers, recursively.
+        @param cpp_name: Full C++ path to Namespace/Class, such as Foo::Bar::Baz.
+        @param header_name: The header where this namespace was declared.
+        @param valid_headers: A set of valid headers from which children can be declared.
+                              useful for trimming if recursive is True.
+        @param package_path: The Cython package path for resolver purposes, such as Foo.Bar;
+                             calculated by caller.
+        """
+        self.cursors = cursors
+        self.cpp_name = cpp_name
+        self.recursive = recursive
+        self.header_name = header_name
+        self.valid_headers = valid_headers
+        self.children = list()
+        # self.class_space = all(c.kind in Space.SPACE_KINDS for c in cursors)
+        self.class_space = all(is_cppclass(c) for c in cursors)
         self.package_path = package_path
         self._types = set()
 
+        for cursor in cursors:
+            self.children += list(filter(self._child_filter, cursor.get_children()))
+
+        i = 0
+        while i < len(self.children):
+            child = self.children[i]
+            if child.kind not in Namespace.VALID_TYPES:
+                warning.warn_unsupported(self.cursors[0], child.kind)
+                self.children.pop(i)
+                continue
+            i += 1
+
+    @staticmethod
+    def _gen_struct_enum(child: clang.cindex.Cursor, datatype, typedef: bool, *_,
+                         name: str = '') -> Generator[str, None, None]:
+        """
+        Yields the types of a struct or enumeration
+        """
+        obj = datatype(child, name=name)
+
+        yield obj.cython_header(typedef)
+
+        for m in obj.members():
+            yield TAB + m
+
+    @property
+    def has_declarations(self) -> bool:
+        """
+        Whether this space has any valid declarations.
+
+        @return: Boolean.
+        """
+        return len(self.children) > 0
+
+    @property
+    def cython_namespace_header(self) -> str:
+        """
+        The Cython header for this namespace.
+
+        @return: str.
+        """
+        base = "cdef extern from \"%s\"" % self.header_name
+        namespace = (" namespace \"%s\":" % self.cpp_name) if self.cpp_name else ':'
+
+        return base + namespace
+
+    def process_types(self, resolver: TypeResolver):
+        """
+        Performs a full pass of this namespace and updates the resolver
+        according to the found types.
+
+        @param resolver: The TypeResolver to update.
+        @return:
+        """
+        unk = list()
+
+        for child in self.children:
+            if child.kind == clang.cindex.CursorKind.ENUM_DECL:
+                if not child.spelling:
+                    unk.append(child)
+                    continue
+                resolver.add_user_defined_type(self._cpp_qual_name(child.spelling), self.package_path)
+            elif child.kind in Namespace.CLASS_TYPES:
+                if not child.spelling:
+                    unk.append(child)
+                    continue
+                resolver.add_user_defined_type(self._cpp_qual_name(child.spelling), self.package_path)
+                for t in Struct(child).ctypes:
+                    resolver.process_type(t, self.cpp_name)
+            elif child.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
+                typedef = Typedef(child)
+                base = typedef.base
+                resolver.add_user_defined_type(self._cpp_qual_name(child.spelling), self.package_path)
+
+                for t in typedef.ctypes:
+                    resolver.process_type(t, self.cpp_name)
+
+                if base in unk:
+                    unk.remove(base)
+                    if not base.kind == clang.cindex.CursorKind.ENUM_DECL:
+                        for t in Struct(base).ctypes:
+                            resolver.process_type(t, self.cpp_name)
+            elif child.kind in Namespace.FUNCTION_TYPES:
+                for t in Function(child).ctypes:
+                    resolver.process_type(t, self.cpp_name)
+            elif child.kind == clang.cindex.CursorKind.VAR_DECL:
+                for t in Member(child).ctypes:
+                    resolver.process_type(t, self.cpp_name)
+
     def generate_declarations(self, resolver: TypeResolver) -> Generator[str, None, None]:
         """
-        A generator for the lines of a C header file or a C++
-        namespace in Cython pxd format. Iterates over enums,
-        structs/classes, typedefs, functions, and variables.
+        Performs a full pass of this namespace and yields the declarations inside.
 
-        Structs/Classes only include instance members. Static
-        members of C++ classes are included in their own
-        namespace declaration.
+        @param resolver: TypeResolver for resolving names.
+        @return: Generator of Cython declarations for this namespace.
         """
         unk = list()
 
@@ -55,7 +187,7 @@ class Namespace(Space):
                     continue
                 for i in Namespace._gen_struct_enum(child, Enumeration, False):
                     yield i
-            elif child.kind in Space.SPACE_KINDS:
+            elif child.kind in Namespace.CLASS_TYPES:
                 if not child.spelling:
                     unk.append(child)
                     continue
@@ -87,19 +219,6 @@ class Namespace(Space):
                 ctypes = mem.ctypes
                 yield self._replace_typenames(mem.declaration, ctypes, resolver)
 
-    @staticmethod
-    def _gen_struct_enum(child: clang.cindex.Cursor, datatype, typedef: bool, *args,
-                        name: str = '') -> Generator[str, None, None]:
-        """
-        Yields the types of a struct or enumeration
-        """
-        obj = datatype(child, name=name)
-
-        yield obj.cython_header(typedef)
-
-        for m in obj.members():
-            yield TAB + m
-
     def _replace_typenames(self, line: str, names: list, resolver: TypeResolver) -> str:
         """
         Replace the typenames that need to be replaced in the input string,
@@ -122,41 +241,32 @@ class Namespace(Space):
             return name
         return "::".join((self.cpp_name, name))
 
-    def process_types(self, resolver: TypeResolver):
+    def _child_filter(self, child: clang.cindex.Cursor):
         """
-        Returns a list of all types in
+        Filters the child cursors of this namespace based on
+        recursive command line options and C++ class specifications
+        where some children may belong to the instance space.
         """
-        unk = list()
-
-        for child in self.children:
-            if child.kind == clang.cindex.CursorKind.ENUM_DECL:
-                if not child.spelling:
-                    unk.append(child)
-                    continue
-                resolver.add_user_defined_type(self._cpp_qual_name(child.spelling), self.package_path)
-            elif child.kind in Space.SPACE_KINDS:
-                if not child.spelling:
-                    unk.append(child)
-                    continue
-                resolver.add_user_defined_type(self._cpp_qual_name(child.spelling), self.package_path)
-                for t in Struct(child).ctypes:
-                    resolver.process_type(t, self.cpp_name)
-            elif child.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
-                typedef = Typedef(child)
-                base = typedef.base
-                resolver.add_user_defined_type(self._cpp_qual_name(child.spelling), self.package_path)
-
-                for t in typedef.ctypes:
-                    resolver.process_type(t, self.cpp_name)
-
-                if base in unk:
-                    unk.remove(base)
-                    if not base.kind == clang.cindex.CursorKind.ENUM_DECL:
-                        for t in Struct(base).ctypes:
-                            resolver.process_type(t, self.cpp_name)
-            elif child.kind in Namespace.FUNCTION_TYPES:
-                for t in Function(child).ctypes:
-                    resolver.process_type(t, self.cpp_name)
-            elif child.kind == clang.cindex.CursorKind.VAR_DECL:
-                for t in Member(child).ctypes:
-                    resolver.process_type(t, self.cpp_name)
+        # Types which are usually printed with the namespace,
+        # but in the case of C++ classes they are printed with
+        # the instance instead.
+        PREFER_INSTANCE = (
+            clang.cindex.CursorKind.TYPEDEF_DECL,
+            clang.cindex.CursorKind.FUNCTION_TEMPLATE
+        )
+        # Prefer typedefs to be in instance defs, rather than namespace defs
+        if self.class_space and child.kind in PREFER_INSTANCE:
+            return False
+        if self.class_space and child.access_specifier == clang.cindex.AccessSpecifier.PRIVATE:
+            return False
+        try:
+            return (
+                    child.kind not in Namespace.STATIC_IGNORED_TYPES and
+                    (
+                        self.recursive or
+                        os.path.basename(child.location.file.name) in self.valid_headers
+                    )
+                   )
+        except AttributeError:
+            warning.warn("AttributeError in namespace %s, header %s, cursor %s" % (self.cpp_name, self.header_name, child.kind))
+            return False
