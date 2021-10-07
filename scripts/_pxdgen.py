@@ -106,15 +106,15 @@ class PXDGen:
             ns.process_types(resolver)
             namespaces[key] = ns
 
-        resolver.warn_unknown_types()
         self._process_namespaces(namespaces, resolver, stream)
+        resolver.warn_unknown_types()
         stream.close()
 
     def _run_directory(self):
         self.base_import_dir = os.path.join(self.opts.header, "..")
         resolver = self._get_directory_resolver(self.opts.header)
-        resolver.warn_unknown_types()
         self._process_directory(self.opts.header, resolver)
+        resolver.warn_unknown_types()
 
     def _process_directory(self, dirname: str, resolver: TypeResolver):
         def _r(d):

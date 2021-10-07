@@ -17,7 +17,6 @@
 import clang.cindex
 from typing import Generator
 from .atomic import Member
-from .typedefs import Typedef
 from .functions import Function, Constructor
 from .. import utils
 from ..utils import warning
@@ -30,7 +29,7 @@ class Struct:
         clang.cindex.CursorKind.CONSTRUCTOR,
         clang.cindex.CursorKind.CXX_METHOD,
         clang.cindex.CursorKind.FUNCTION_TEMPLATE,
-        clang.cindex.CursorKind.TYPEDEF_DECL,
+        # clang.cindex.CursorKind.TYPEDEF_DECL,
     )
 
     # Just for checking valid types
@@ -43,7 +42,8 @@ class Struct:
              clang.cindex.CursorKind.ENUM_DECL,
              clang.cindex.CursorKind.VAR_DECL,
              clang.cindex.CursorKind.CLASS_DECL,
-             clang.cindex.CursorKind.CLASS_TEMPLATE
+             clang.cindex.CursorKind.CLASS_TEMPLATE,
+             clang.cindex.CursorKind.TYPEDEF_DECL
         )
     )
 
@@ -98,8 +98,8 @@ class Struct:
                     ret += Function(child).ctypes
                 elif child.kind == clang.cindex.CursorKind.CONSTRUCTOR:
                     ret += Constructor(child).ctypes
-                elif child.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
-                    ret += Typedef(child).ctypes
+                # elif child.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
+                #    ret += Typedef(child).ctypes
 
         if template_params:
             return list(filter(lambda p: p not in template_params, ret))
@@ -164,5 +164,5 @@ class Struct:
             return Function(child).declaration
         elif child.kind == clang.cindex.CursorKind.CONSTRUCTOR:
             return Constructor(child).declaration
-        elif child.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
-            return Typedef(child).declaration
+        # elif child.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
+        #    return Typedef(child).declaration

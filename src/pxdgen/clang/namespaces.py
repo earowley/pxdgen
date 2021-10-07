@@ -22,6 +22,7 @@ from .structs import Struct
 from .typedefs import Typedef
 from .functions import Function
 from .atomic import Member
+from .unions import Union
 from ..constants import TAB
 from ..config import Setting, get_config
 from ..utils import TypeResolver, is_cppclass, warning
@@ -55,7 +56,8 @@ class Namespace:
     # All valid types. Convenient for fast warning determination
     VALID_TYPES = (clang.cindex.CursorKind.ENUM_DECL,
                    clang.cindex.CursorKind.TYPEDEF_DECL,
-                   clang.cindex.CursorKind.VAR_DECL
+                   clang.cindex.CursorKind.VAR_DECL,
+                   clang.cindex.CursorKind.UNION_DECL
     ) + FUNCTION_TYPES + CLASS_TYPES + STATIC_IGNORED_TYPES
 
     def __init__(self, cursors: list, recursive: bool, cpp_name: str,
@@ -149,29 +151,18 @@ class Namespace:
                 if not child.spelling:
                     unk.append(child)
                     continue
-                s = Struct(child)
                 resolver.add_user_defined_type(self._cpp_qual_name(child.spelling), self.package_path)
-                for t in s.ctypes:
-                    resolver.process_type(t, self.cpp_name)
             elif child.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
                 typedef = Typedef(child)
                 base = typedef.base
                 resolver.add_user_defined_type(self._cpp_qual_name(child.spelling), self.package_path)
-
-                for t in typedef.ctypes:
-                    resolver.process_type(t, self.cpp_name)
-
-                if base in unk:
+                if base and base in unk:
                     unk.remove(base)
-                    if not base.kind == clang.cindex.CursorKind.ENUM_DECL:
-                        for t in Struct(base).ctypes:
-                            resolver.process_type(t, self.cpp_name)
-            elif child.kind in Namespace.FUNCTION_TYPES:
-                for t in Function(child).ctypes:
-                    resolver.process_type(t, self.cpp_name)
-            elif child.kind == clang.cindex.CursorKind.VAR_DECL:
-                for t in Member(child).ctypes:
-                    resolver.process_type(t, self.cpp_name)
+            elif child.kind == clang.cindex.CursorKind.UNION_DECL:
+                if not child.spelling:
+                    unk.append(child)
+                    continue
+                resolver.add_user_defined_type(self._cpp_qual_name(child.spelling), self.package_path)
 
     def generate_declarations(self, resolver: TypeResolver) -> Generator[str, None, None]:
         """
@@ -195,6 +186,8 @@ class Namespace:
                     continue
                 s = Struct(child)
                 ctypes = s.ctypes
+                for t in ctypes:
+                    resolver.process_type(t, self.cpp_name)
                 struct_iter = Namespace._gen_struct_enum(child, Struct, False)
                 yield next(struct_iter)
                 for i in struct_iter:
@@ -202,14 +195,25 @@ class Namespace:
             elif child.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
                 typedef = Typedef(child)
                 base = typedef.base
-
-                if base in unk:
+                for t in typedef.ctypes:
+                    resolver.process_type(t, self.cpp_name)
+                if base and base in unk:
                     if base.kind == clang.cindex.CursorKind.ENUM_DECL:
                         for i in Namespace._gen_struct_enum(base, Enumeration, True, name=child.spelling):
                             yield i
+                    elif base.kind == clang.cindex.CursorKind.UNION_DECL:
+                        ctypes = Union(base).ctypes
+                        u_iter = Namespace._gen_struct_enum(base, Union, True, name=child.spelling)
+                        for t in ctypes:
+                            resolver.process_type(t, self.cpp_name)
+                        yield next(u_iter)
+                        for i in u_iter:
+                            yield self._replace_typenames(i, ctypes, resolver)
                     else:
                         ctypes = Struct(base).ctypes
                         struct_iter = Namespace._gen_struct_enum(base, Struct, True, name=child.spelling)
+                        for t in ctypes:
+                            resolver.process_type(t, self.cpp_name)
                         yield next(struct_iter)
                         for i in struct_iter:
                             yield self._replace_typenames(i, ctypes, resolver)
@@ -220,11 +224,27 @@ class Namespace:
             elif child.kind in Namespace.FUNCTION_TYPES:
                 func = Function(child)
                 ctypes = func.ctypes
+                for t in ctypes:
+                    resolver.process_type(t, self.cpp_name)
                 yield self._replace_typenames(func.declaration, ctypes, resolver)
             elif child.kind == clang.cindex.CursorKind.VAR_DECL:
                 mem = Member(child)
                 ctypes = mem.ctypes
+                for t in ctypes:
+                    resolver.process_type(t, self.cpp_name)
                 yield self._replace_typenames(mem.declaration, ctypes, resolver)
+            elif child.kind == clang.cindex.CursorKind.UNION_DECL:
+                if not child.spelling:
+                    unk.append(child)
+                    continue
+                u = Union(child)
+                ctypes = u.ctypes
+                u_iter = Namespace._gen_struct_enum(child, Union, False)
+                for t in ctypes:
+                    resolver.process_type(t, self.cpp_name)
+                yield next(u_iter)
+                for i in u_iter:
+                    yield self._replace_typenames(i, ctypes, resolver)
 
     def _replace_typenames(self, line: str, names: list, resolver: TypeResolver) -> str:
         """
@@ -258,8 +278,7 @@ class Namespace:
         # but in the case of C++ classes they are printed with
         # the instance instead.
         PREFER_INSTANCE = (
-            clang.cindex.CursorKind.TYPEDEF_DECL,
-            clang.cindex.CursorKind.FUNCTION_TEMPLATE
+            clang.cindex.CursorKind.FUNCTION_TEMPLATE,
         )
         # Prefer typedefs to be in instance defs, rather than namespace defs
         if self.class_space and child.kind in PREFER_INSTANCE:

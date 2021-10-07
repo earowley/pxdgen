@@ -70,6 +70,16 @@ class TypeResolver:
         self.unknown_types = dict()
         self.unknown_imports = set()
 
+    @staticmethod
+    def _iter_parent_namespaces(low: str) -> Generator[str, None, None]:
+        yield low
+        sep = low.rfind("::")
+
+        while sep != -1:
+            low = low[:sep]
+            sep = low.rfind("::")
+            yield low
+
     def add_user_defined_type(self, type_string: str, import_string: str):
         """
         Adds a type and necessary import information to the type repository.
@@ -80,10 +90,10 @@ class TypeResolver:
         """
         p_type = ProcessedType(type_string, import_string)
 
-        try:
-            self.unknown_types.pop(p_type)
-        except KeyError:
-            pass
+        # try:
+        #     self.unknown_types.pop(p_type)
+        # except KeyError:
+        #     pass
 
         self.known_types[type_string] = p_type
 
@@ -96,13 +106,12 @@ class TypeResolver:
         @param current_namespace: The current namespace being parsed. Used to check local references.
         @return: None
         """
-        possible_cpp_name = "::".join((current_namespace, type_string)) if current_namespace else type_string
-
         if type_string in TypeResolver.BUILTINS:
             return
 
         # Check global types and types relative to current namespace
-        if type_string in self.known_types or possible_cpp_name in self.known_types:
+        if current_namespace and (type_string in self.known_types or
+                                  any("::".join((ns, type_string)) in self.known_types for ns in TypeResolver._iter_parent_namespaces(current_namespace))):
             return
 
         # Check if it is available in C/C++ Cython stdlib
@@ -144,12 +153,16 @@ class TypeResolver:
                     self.imports.add(p_type.import_string)
                 ret.append((type_string, p_type.basename))
                 continue
-            p_type = self.known_types.get("::".join((current_namespace, type_string)), None)
-            if p_type:
-                if p_type.package_path not in IGNORE_IMPORTS and p_type.package_path != import_path:
-                    self.imports.add(p_type.import_string)
-                ret.append((type_string, p_type.basename))
-                continue
+            if current_namespace:
+                for ns in TypeResolver._iter_parent_namespaces(current_namespace):
+                    p_type = self.known_types.get("::".join((ns, type_string)), None)
+                    if p_type is not None:
+                        break
+                if p_type:
+                    if p_type.package_path not in IGNORE_IMPORTS and p_type.package_path != import_path:
+                        self.imports.add(p_type.import_string)
+                    ret.append((type_string, p_type.basename))
+                    continue
             p_type = self.unknown_types.get(type_string, None)
             assert p_type is not None, "Type %s is not known or unknown" % type_string
             self.unknown_imports.add(p_type)
