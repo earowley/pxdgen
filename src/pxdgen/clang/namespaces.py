@@ -151,7 +151,9 @@ class Namespace:
                 if not child.spelling:
                     unk.append(child)
                     continue
-                resolver.add_user_defined_type(self._cpp_qual_name(child.spelling), self.package_path)
+                cppn = self._cpp_qual_name(child.spelling)
+                if not resolver.has_type(cppn, self.package_path) or not Struct(child).is_forward_decl:
+                    resolver.add_user_defined_type(cppn, self.package_path)
             elif child.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
                 typedef = Typedef(child)
                 base = typedef.base
@@ -185,6 +187,11 @@ class Namespace:
                     unk.append(child)
                     continue
                 s = Struct(child)
+                if (s.is_forward_decl and not 
+                    get_config(Setting.FORWARD_DECL) and not 
+                    resolver.has_type("::".join((self.cpp_name, child.spelling)), self.package_path)
+                ):
+                    continue
                 ctypes = s.ctypes
                 for t in ctypes:
                     resolver.process_type(t, self.cpp_name)
@@ -281,12 +288,13 @@ class Namespace:
             clang.cindex.CursorKind.FUNCTION_TEMPLATE,
         )
         # Prefer typedefs to be in instance defs, rather than namespace defs
-        if self.class_space and child.kind in PREFER_INSTANCE:
+        if self.class_space and (
+            child.kind in PREFER_INSTANCE or
+            child.access_specifier == clang.cindex.AccessSpecifier.PRIVATE
+        ):
             return False
-        if self.class_space and child.access_specifier == clang.cindex.AccessSpecifier.PRIVATE:
-            return False
-        if child.kind in Namespace.CLASS_TYPES and Struct(child).is_forward_decl and not get_config(Setting.FORWARD_DECL):
-            return False
+        # if child.kind in Namespace.CLASS_TYPES and Struct(child).is_forward_decl and not get_config(Setting.FORWARD_DECL):
+        #    return False
         try:
             return (
                     child.kind not in Namespace.STATIC_IGNORED_TYPES and
