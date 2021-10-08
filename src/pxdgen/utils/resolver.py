@@ -69,6 +69,8 @@ class TypeResolver:
         self.known_types = dict()
         self.unknown_types = dict()
         self.unknown_imports = set()
+        self.import_namespace = set()
+        self.import_mapping = dict()
 
     @staticmethod
     def _iter_parent_namespaces(low: str) -> Generator[str, None, None]:
@@ -80,17 +82,25 @@ class TypeResolver:
             sep = low.rfind("::")
             yield low
             
-    def has_type(self, cpp_name: str, package_path: str) -> bool:
+    def has_type(self, cpp_name: str) -> bool:
         """
         Whether there is a defined type with
         the specified C++ name
         """
-        p_type = self.known_types.get(cpp_name, None)
-        
-        if p_type is None:
+        return cpp_name in self.known_types
+
+    def has_type_at_location(self, cpp_name: str, package_path: str) -> bool:
+        """
+        Whether there is a defined type with
+        the specified C++ name at specified
+        package path
+        """
+        pt = self.known_types.get(cpp_name, None)
+
+        if pt is None:
             return False
-            
-        return p_type.package_path == package_path
+
+        return pt.package_path == package_path
 
     def add_user_defined_type(self, type_string: str, import_string: str):
         """
@@ -162,8 +172,10 @@ class TypeResolver:
             p_type = self.known_types.get(type_string, None)
             if p_type:
                 if p_type.package_path not in IGNORE_IMPORTS and p_type.package_path != import_path:
-                    self.imports.add(p_type.import_string)
-                ret.append((type_string, p_type.basename))
+                    self.imports.add(self._process_import(p_type))
+                    ret.append((type_string, self.import_mapping[p_type.cpp_name]))
+                else:
+                    ret.append((type_string, p_type.basename))
                 continue
             if current_namespace:
                 for ns in TypeResolver._iter_parent_namespaces(current_namespace):
@@ -172,8 +184,10 @@ class TypeResolver:
                         break
                 if p_type:
                     if p_type.package_path not in IGNORE_IMPORTS and p_type.package_path != import_path:
-                        self.imports.add(p_type.import_string)
-                    ret.append((type_string, p_type.basename))
+                        self.imports.add(self._process_import(p_type))
+                        ret.append((type_string, self.import_mapping[p_type.cpp_name]))
+                    else:
+                        ret.append((type_string, p_type.basename))
                     continue
             p_type = self.unknown_types.get(type_string, None)
             assert p_type is not None, "Type %s is not known or unknown" % type_string
@@ -193,6 +207,8 @@ class TypeResolver:
         """
         while self.imports:
             yield self.imports.pop()
+        self.import_mapping.clear()
+        self.import_namespace.clear()
 
     def drain_unknown_imports(self) -> Generator[str, None, None]:
         """
@@ -225,6 +241,32 @@ class TypeResolver:
         """
         for ut in self.unknown_types:
             warning.warn("Unresolved type: %s" % ut)
+
+    def _process_import(self, ptype) -> str:
+        check = self.import_mapping.get(ptype.cpp_name, None)
+
+        if check is not None:
+            if check == ptype.basename:
+                return ptype.import_string
+            return ptype.import_string + " as " + check
+
+        parts = ptype.cpp_name.split("::")
+        check = parts.pop()
+
+        while check in self.import_namespace:
+            if not len(parts):
+                warning.warn("Namespace pollution with type %s" % check)
+                self.import_mapping[ptype.cpp_name] = check
+                return check
+            check = parts.pop() + '_' + check
+
+        self.import_mapping[ptype.cpp_name] = check
+        self.import_namespace.add(check)
+
+        if check == ptype.basename:
+            return ptype.import_string
+
+        return ptype.import_string + " as " + check
 
 
 class ProcessedType:

@@ -152,7 +152,7 @@ class Namespace:
                     unk.append(child)
                     continue
                 cppn = self._cpp_qual_name(child.spelling)
-                if not resolver.has_type(cppn, self.package_path) or not Struct(child).is_forward_decl:
+                if not resolver.has_type(cppn) or not Struct(child).is_forward_decl:
                     resolver.add_user_defined_type(cppn, self.package_path)
             elif child.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
                 typedef = Typedef(child)
@@ -189,7 +189,7 @@ class Namespace:
                 s = Struct(child)
                 if (s.is_forward_decl and not 
                     get_config(Setting.FORWARD_DECL) and not 
-                    resolver.has_type("::".join((self.cpp_name, child.spelling)), self.package_path)
+                    resolver.has_type_at_location("::".join((self.cpp_name, child.spelling)), self.package_path)
                 ):
                     continue
                 ctypes = s.ctypes
