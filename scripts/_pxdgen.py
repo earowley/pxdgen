@@ -176,6 +176,7 @@ class PXDGen:
 
     def _get_directory_resolver(self, dirname: str) -> TypeResolver:
         resolver = TypeResolver()
+        all_spaces = dict()
 
         def _r(s):
             for handle in os.scandir(s):
@@ -187,13 +188,18 @@ class PXDGen:
                     tu = self.index.parse(handle.path, self.clang_args)
                     namespaces = pxdgen.utils.find_namespaces(tu.cursor)
                     namespaces[''] = [tu.cursor]
-                    rip = self._rel_import_path(handle.path)
                     for key, value in namespaces.items():
-                        # (cursors, recursive, cpp_path, header_name,
-                        namespaces[key] = Namespace(value, False, key, rip, {os.path.basename(handle.path)}, package_path=rip[:rip.rindex(".h")].replace(os.path.sep, '.'))
-                    for namespace in namespaces.values():
-                        namespace.process_types(resolver)
+                        if key in all_spaces:
+                            all_spaces[key] += value
+                        else:
+                            all_spaces[key] = value
         _r(dirname)
+
+        for cppath, cursors in all_spaces.items():
+            # (cursors, recursive, cpp_path, header_name, valid hdeaders)
+            ns = Namespace(cursors, False, cppath, '', set())
+            all_spaces[cppath] = ns
+            ns.process_types(resolver)
 
         return resolver
 

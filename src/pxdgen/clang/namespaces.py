@@ -24,7 +24,7 @@ from .functions import Function
 from .atomic import Member
 from .unions import Union
 from ..constants import TAB
-from ..config import Setting, get_config
+from collections import defaultdict
 from ..utils import TypeResolver, is_cppclass, warning
 
 
@@ -61,7 +61,7 @@ class Namespace:
     ) + FUNCTION_TYPES + CLASS_TYPES + STATIC_IGNORED_TYPES
 
     def __init__(self, cursors: list, recursive: bool, cpp_name: str,
-                 header_name: str, valid_headers: set, *_, package_path: str = ''):
+                 header_name: str, valid_headers: set, *_):
         """
         Represents a Cython namespace declaration, given the following parameters.
 
@@ -80,10 +80,8 @@ class Namespace:
         self.header_name = header_name
         self.valid_headers = valid_headers
         self.children = list()
-        # self.class_space = all(c.kind in Space.SPACE_KINDS for c in cursors)
         self.class_space = all(is_cppclass(c) for c in cursors)
-        self.package_path = package_path
-        self._types = set()
+        self.decls = defaultdict(lambda: [])
 
         for cursor in cursors:
             self.children += list(filter(self._child_filter, cursor.get_children()))
@@ -146,25 +144,24 @@ class Namespace:
                 if not child.spelling:
                     unk.append(child)
                     continue
-                resolver.add_user_defined_type(self._cpp_qual_name(child.spelling), self.package_path)
+                resolver.add_user_defined_type(self._cpp_qual_name(child.spelling))
             elif child.kind in Namespace.CLASS_TYPES:
                 if not child.spelling:
                     unk.append(child)
                     continue
                 cppn = self._cpp_qual_name(child.spelling)
-                if not resolver.has_type(cppn) or not Struct(child).is_forward_decl:
-                    resolver.add_user_defined_type(cppn, self.package_path)
+                resolver.add_user_defined_type(cppn)
             elif child.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
                 typedef = Typedef(child)
                 base = typedef.base
-                resolver.add_user_defined_type(self._cpp_qual_name(child.spelling), self.package_path)
+                resolver.add_user_defined_type(self._cpp_qual_name(child.spelling))
                 if base and base in unk:
                     unk.remove(base)
             elif child.kind == clang.cindex.CursorKind.UNION_DECL:
                 if not child.spelling:
                     unk.append(child)
                     continue
-                resolver.add_user_defined_type(self._cpp_qual_name(child.spelling), self.package_path)
+                resolver.add_user_defined_type(self._cpp_qual_name(child.spelling))
 
     def generate_declarations(self, resolver: TypeResolver) -> Generator[str, None, None]:
         """
@@ -187,10 +184,8 @@ class Namespace:
                     unk.append(child)
                     continue
                 s = Struct(child)
-                if (s.is_forward_decl and not 
-                    get_config(Setting.FORWARD_DECL) and not 
-                    resolver.has_type_at_location("::".join((self.cpp_name, child.spelling)), self.package_path)
-                ):
+                self.decls[child.spelling].append(s)
+                if s.is_forward_decl:
                     continue
                 ctypes = s.ctypes
                 for t in ctypes:
@@ -253,13 +248,18 @@ class Namespace:
                 for i in u_iter:
                     yield self._replace_typenames(i, ctypes, resolver)
 
+        for decl_list in self.decls.values():
+            if len(decl_list) == 1 and decl_list[0].is_forward_decl:
+                for v in Namespace._gen_struct_enum(decl_list[0], Struct, False):
+                    yield v
+
     def _replace_typenames(self, line: str, names: list, resolver: TypeResolver) -> str:
         """
         Replace the typenames that need to be replaced in the input string,
         based on what is defined in the TypeResolver
         """
         ret = line
-        replacements = resolver.add_imports_from_types(names, self.cpp_name, self.package_path)
+        replacements = resolver.add_imports_from_types(names, self.cpp_name)
 
         for old, new in replacements:
             ret = ret.replace(old, new)
