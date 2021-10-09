@@ -34,9 +34,7 @@ def is_cppclass(cursor: clang.cindex.Cursor) -> bool:
         return True
 
     for child in cursor.get_children():
-        if child.kind == clang.cindex.CursorKind.FIELD_DECL:
-            continue
-        if child.spelling or child.kind not in ANON:
+        if child.kind not in  ANON + (clang.cindex.CursorKind.FIELD_DECL,):
             return True
 
     return False

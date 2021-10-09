@@ -99,7 +99,7 @@ class TypeResolver:
         @param current_namespace: The current namespace being parsed. Used to check local references.
         @return: None
         """
-        if type_string in TypeResolver.BUILTINS:
+        if type_string in TypeResolver.BUILTINS or type_string in self.known_types:
             return
 
         # Check global types and types relative to current namespace
