@@ -79,26 +79,6 @@ class TypeResolver:
             low = low[:sep]
             sep = low.rfind("::")
             yield low
-            
-    def has_type(self, cpp_name: str) -> bool:
-        """
-        Whether there is a defined type with
-        the specified C++ name
-        """
-        return cpp_name in self.known_types
-
-    def has_type_at_location(self, cpp_name: str, package_path: str) -> bool:
-        """
-        Whether there is a defined type with
-        the specified C++ name at specified
-        package path
-        """
-        pt = self.known_types.get(cpp_name, None)
-
-        if pt is None:
-            return False
-
-        return pt.package_path == package_path
 
     def add_user_defined_type(self, type_string: str):
         """

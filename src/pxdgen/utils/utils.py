@@ -26,12 +26,23 @@ def is_cppclass(cursor: clang.cindex.Cursor) -> bool:
     @return: Boolean.
     """
     # There can be anonymous structs and enumerations as fields
-    # CTYPES = (clang.cindex.CursorKind.FIELD_DECL, clang.cindex.CursorKind.STRUCT_DECL, clang.cindex.CursorKind.ENUM_DECL, clang.cindex.CursorKind.UNION_DECL)
+    ANON = (clang.cindex.CursorKind.STRUCT_DECL, clang.cindex.CursorKind.ENUM_DECL, clang.cindex.CursorKind.UNION_DECL)
     # return cursor.kind != clang.cindex.CursorKind.STRUCT_DECL or any((mem.kind not in CTYPES for mem in cursor.get_children()))
-    return cursor.kind in (clang.cindex.CursorKind.CLASS_DECL, clang.cindex.CursorKind.CLASS_TEMPLATE)
+    if cursor.kind not in (clang.cindex.CursorKind.CLASS_DECL, clang.cindex.CursorKind.CLASS_TEMPLATE, clang.cindex.CursorKind.STRUCT_DECL):
+        return False
+    if cursor.kind in (clang.cindex.CursorKind.CLASS_DECL, clang.cindex.CursorKind.CLASS_TEMPLATE):
+        return True
+
+    for child in cursor.get_children():
+        if child.kind == clang.cindex.CursorKind.FIELD_DECL:
+            continue
+        if child.spelling or child.kind not in ANON:
+            return True
+
+    return False
 
 
-def find_namespaces(cursor: clang.cindex.Cursor, curr_name='') -> dict:
+def find_namespaces(cursor: clang.cindex.Cursor, valid_headers: set = None, curr_name='') -> dict:
     """
     Finds namespaces, given the top-level cursor of a header file.
     @param cursor: Clang Cursor.
@@ -53,24 +64,24 @@ def find_namespaces(cursor: clang.cindex.Cursor, curr_name='') -> dict:
 
     # Valid kinds that can be represented as a namespace in Cython
     # excluding Namespace
-    CLASS_KINDS = (clang.cindex.CursorKind.STRUCT_DECL,
+    CLASS_KINDS = (
+                   clang.cindex.CursorKind.STRUCT_DECL,
                    clang.cindex.CursorKind.CLASS_DECL,
-                   clang.cindex.CursorKind.CLASS_TEMPLATE)
+                   clang.cindex.CursorKind.CLASS_TEMPLATE,
+                   clang.cindex.CursorKind.NAMESPACE
+    )
 
     ret = dict()
     namespaces = list()
 
     for child in cursor.get_children():
-        if child.kind in CLASS_KINDS:
-            if is_cppclass(child):
-                namespaces.append(child)
-        elif child.kind == clang.cindex.CursorKind.NAMESPACE:
+        if (child.kind == clang.cindex.CursorKind.NAMESPACE or is_cppclass(child)) and (valid_headers is None or child.location.file.name in valid_headers):
             namespaces.append(child)
 
     for namespace in namespaces:
-        _update(ret, find_namespaces(namespace, curr_name + "::" + namespace.spelling))
+        _update(ret, find_namespaces(namespace, valid_headers, curr_name + "::" + namespace.spelling))
 
-    if cursor.kind in (CLASS_KINDS + (clang.cindex.CursorKind.NAMESPACE,)):
+    if cursor.kind in CLASS_KINDS:
         _update(ret, {curr_name.strip("::"): [cursor]})
 
     return ret

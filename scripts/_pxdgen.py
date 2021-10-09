@@ -13,7 +13,7 @@
 
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
+from __future__ import annotations
 import argparse
 import sys
 import os
@@ -47,7 +47,7 @@ class PXDGen:
             if not program_options.output:
                 exit("To use directory output mode, specify a directory output name with '-o'")
             if not os.path.isdir(program_options.header):
-                exit("Unable to find input directory %s" % program_options.header)
+                exit("Unable to find input directory '%s'" % program_options.header)
 
             if not os.path.isdir(program_options.output):
                 os.mkdir(program_options.output)
@@ -92,17 +92,17 @@ class PXDGen:
 
     def _run_standard(self):
         stream = sys.stdout if not self.opts.output else open(self.opts.output, 'w')
-        valid_headers = {os.path.basename(self.opts.header)}
+        valid_headers = {self.opts.header}
         tu = self.index.parse(self.opts.header, self.clang_args)
         namespaces = pxdgen.utils.find_namespaces(tu.cursor)
         namespaces[''] = [tu.cursor]
         resolver = TypeResolver()
 
         if self.opts.recursive and self.opts.headers:
-            valid_headers |= {os.path.basename(g) for g in glob.glob(self.opts.headers)}
+            valid_headers |= set(glob.glob(self.opts.headers))
 
         for key, value in namespaces.items():
-            ns = Namespace(value, self.opts.recursive and not self.opts.headers, key, os.path.basename(self.opts.header), valid_headers)
+            ns = Namespace(value, self.opts.recursive and not self.opts.headers, key, self.opts.header, valid_headers)
             ns.process_types(resolver)
             namespaces[key] = ns
 
@@ -111,41 +111,12 @@ class PXDGen:
         stream.close()
 
     def _run_directory(self):
-        self.base_import_dir = os.path.join(self.opts.header, "..")
-        resolver = self._get_directory_resolver(self.opts.header)
-        self._process_directory(self.opts.header, resolver)
+        resolver, spaces = self._preprocess_directory(self.opts.header)
+
+        for cpp_space in spaces:
+            with open(os.path.join(self.opts.output, cpp_space.replace("::", '.') + ".pxd"), 'w') as out:
+                self._process_namespaces(spaces[cpp_space], resolver, out)
         resolver.warn_unknown_types()
-
-    def _process_directory(self, dirname: str, resolver: TypeResolver):
-        def _r(d):
-            for handle in os.scandir(d):
-                if handle.is_dir():
-                    _r(handle.path)
-                else:
-                    if not handle.name.endswith(".h") and not handle.name.endswith(".hpp"):
-                        continue
-                    self._process_file(handle.path, resolver)
-        _r(dirname)
-
-    def _process_file(self, input_file: str, resolver: TypeResolver):
-        tu = self.index.parse(input_file, self.clang_args)
-        namespaces = pxdgen.utils.find_namespaces(tu.cursor)
-        namespaces[''] = [tu.cursor]
-        rip = self._rel_import_path(input_file)
-        output_file = os.path.join(self.opts.output, rip[:rip.rindex('.')] + ".pxd")
-        import_path = rip[:rip.rindex(".h")].replace(os.path.sep, '.')
-        out_dir = os.path.dirname(output_file)
-
-        if not os.path.isdir(out_dir):
-            os.makedirs(out_dir)
-
-        stream = open(output_file, 'w')
-
-        for key, value in namespaces.items():
-            namespaces[key] = Namespace(value, False, key, rip, {os.path.basename(input_file)}, package_path=import_path)
-
-        self._process_namespaces(namespaces, resolver, stream)
-        stream.close()
 
     def _process_namespaces(self, namespaces: dict, resolver: TypeResolver, stream):
         writer = TabWriter()
@@ -174,7 +145,7 @@ class PXDGen:
 
         stream.write(writer.getvalue())
 
-    def _get_directory_resolver(self, dirname: str) -> TypeResolver:
+    def _preprocess_directory(self, dirname: str) -> tuple:
         resolver = TypeResolver()
         all_spaces = dict()
 
@@ -185,26 +156,26 @@ class PXDGen:
                 else:
                     if not handle.name.endswith(".h") and not handle.name.endswith(".hpp"):
                         continue
+                    print(f"Pre-processing {handle.path}...")
                     tu = self.index.parse(handle.path, self.clang_args)
-                    namespaces = pxdgen.utils.find_namespaces(tu.cursor)
+                    namespaces = pxdgen.utils.find_namespaces(tu.cursor, {handle.path})
                     namespaces[''] = [tu.cursor]
                     for key, value in namespaces.items():
                         if key in all_spaces:
-                            all_spaces[key] += value
+                            all_spaces[key][handle.path] = value
                         else:
-                            all_spaces[key] = value
+                            all_spaces[key] = {handle.path:  value}
         _r(dirname)
 
-        for cppath, cursors in all_spaces.items():
-            # (cursors, recursive, cpp_path, header_name, valid hdeaders)
-            ns = Namespace(cursors, False, cppath, '', set())
-            all_spaces[cppath] = ns
-            ns.process_types(resolver)
+        for cppath in all_spaces:
+            print(f"Generating type info for namespace {cppath}")
+            for header in all_spaces[cppath]:
+                # (cursors, recursive, cpp_path, header_name, valid hdeaders)
+                ns = Namespace(all_spaces[cppath][header], False, cppath, header, {header})
+                all_spaces[cppath][header] = ns
+                ns.process_types(resolver)
 
-        return resolver
-
-    def _rel_import_path(self, abspath: str) -> str:
-        return os.path.relpath(abspath, self.base_import_dir)
+        return resolver, all_spaces
 
 
 def main():

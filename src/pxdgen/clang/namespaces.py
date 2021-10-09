@@ -15,7 +15,6 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import clang.cindex
-import os
 from typing import Generator
 from .enums import Enumeration
 from .structs import Struct
@@ -24,7 +23,7 @@ from .functions import Function
 from .atomic import Member
 from .unions import Union
 from ..constants import TAB
-from collections import defaultdict
+from ..config import get_config, Setting
 from ..utils import TypeResolver, is_cppclass, warning
 
 
@@ -81,7 +80,6 @@ class Namespace:
         self.valid_headers = valid_headers
         self.children = list()
         self.class_space = all(is_cppclass(c) for c in cursors)
-        self.decls = defaultdict(lambda: [])
 
         for cursor in cursors:
             self.children += list(filter(self._child_filter, cursor.get_children()))
@@ -184,9 +182,6 @@ class Namespace:
                     unk.append(child)
                     continue
                 s = Struct(child)
-                self.decls[child.spelling].append(s)
-                if s.is_forward_decl:
-                    continue
                 ctypes = s.ctypes
                 for t in ctypes:
                     resolver.process_type(t, self.cpp_name)
@@ -248,11 +243,6 @@ class Namespace:
                 for i in u_iter:
                     yield self._replace_typenames(i, ctypes, resolver)
 
-        for decl_list in self.decls.values():
-            if len(decl_list) == 1 and decl_list[0].is_forward_decl:
-                for v in Namespace._gen_struct_enum(decl_list[0], Struct, False):
-                    yield v
-
     def _replace_typenames(self, line: str, names: list, resolver: TypeResolver) -> str:
         """
         Replace the typenames that need to be replaced in the input string,
@@ -293,14 +283,14 @@ class Namespace:
             child.access_specifier == clang.cindex.AccessSpecifier.PRIVATE
         ):
             return False
-        # if child.kind in Namespace.CLASS_TYPES and Struct(child).is_forward_decl and not get_config(Setting.FORWARD_DECL):
-        #    return False
+        if child.kind in Namespace.CLASS_TYPES and Struct(child).is_forward_decl and not get_config(Setting.FORWARD_DECL):
+            return False
         try:
             return (
                     child.kind not in Namespace.STATIC_IGNORED_TYPES and
                     (
                         self.recursive or
-                        os.path.basename(child.location.file.name) in self.valid_headers
+                        child.location.file.name in self.valid_headers
                     )
                    )
         except AttributeError:
