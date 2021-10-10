@@ -25,7 +25,7 @@ class TypeResolver:
                 "size_t", "ssize_t"
     }
 
-    def __init__(self):
+    def __init__(self, importable_udt: bool):
         self.c_imports = {
             "int8_t": "libc.stdint",
             "int16_t": "libc.stdint",
@@ -69,6 +69,7 @@ class TypeResolver:
         self.known_types = dict()
         self.unknown_types = dict()
         self.unknown_imports = set()
+        self.iudt = importable_udt
 
     @staticmethod
     def _iter_parent_namespaces(low: str) -> Generator[str, None, None]:
@@ -87,7 +88,7 @@ class TypeResolver:
         @param type_string: fully qualified C++ name, such as 'A::B::C'.
         @return: None
         """
-        p_type = ProcessedType(type_string)
+        p_type = ProcessedType(type_string, self.iudt)
         self.known_types[type_string] = p_type
 
     def process_type(self, type_string: str, current_namespace: str):
@@ -101,7 +102,7 @@ class TypeResolver:
         """
         if type_string in TypeResolver.BUILTINS or type_string in self.known_types:
             return
-
+            
         # Check global types and types relative to current namespace
         if current_namespace and (type_string in self.known_types or
                                   any("::".join((ns, type_string)) in self.known_types for ns in TypeResolver._iter_parent_namespaces(current_namespace))):
@@ -109,20 +110,20 @@ class TypeResolver:
 
         # Check if it is available in C/C++ Cython stdlib
         try:
-            cython_c_type = ProcessedType(type_string, path_override=self.c_imports.pop(type_string))
+            cython_c_type = ProcessedType(type_string, True, path_override=self.c_imports.pop(type_string))
             self.known_types[type_string] = cython_c_type
             return
         except KeyError:
             pass
 
         try:
-            cython_cpp_type = ProcessedType(type_string, path_override=self.cpp_imports.pop(type_string))
+            cython_cpp_type = ProcessedType(type_string, True, path_override=self.cpp_imports.pop(type_string))
             self.known_types[type_string] = cython_cpp_type
             return
         except KeyError:
             pass
 
-        self.unknown_types[type_string] = ProcessedType(type_string, '')
+        self.unknown_types[type_string] = ProcessedType(type_string, False)
 
     def add_imports_from_types(self, types: list, current_namespace: str) -> list:
         """
@@ -141,7 +142,9 @@ class TypeResolver:
                 continue
             p_type = self.known_types.get(type_string, None)
             if p_type:
-                if p_type.package_path not in IGNORE_IMPORTS and p_type.cpp_space != current_namespace:
+                if (p_type.package_path not in IGNORE_IMPORTS and 
+                    p_type.cpp_space != current_namespace and
+                    p_type.importable):
                     self.imports.add(p_type.import_string)
                     ret.append((type_string, p_type.import_name))
                 else:
@@ -153,7 +156,9 @@ class TypeResolver:
                     if p_type is not None:
                         break
                 if p_type:
-                    if p_type.package_path not in IGNORE_IMPORTS and p_type.cpp_space != current_namespace:
+                    if (p_type.package_path not in IGNORE_IMPORTS and 
+                        p_type.cpp_space != current_namespace and
+                        p_type.importable):
                         self.imports.add(p_type.import_string)
                         ret.append((type_string, p_type.import_name))
                     else:
@@ -212,13 +217,14 @@ class TypeResolver:
 
 
 class ProcessedType:
-    def __init__(self, cpp_name: str, *_, path_override: str = ''):
+    def __init__(self, cpp_name: str, importable: bool, *_, path_override: str = ''):
         self.cpp_name = cpp_name
         parts = cpp_name.split("::")
-        self._basename = parts[-1]
+        self.basename = parts[-1]
         self.package_path = path_override if path_override else '.'.join(parts[:-1])
         self.cpp_space = "::".join(parts[:-1])
         self.import_name = self.cpp_name.replace("::", '_')
+        self.importable = importable
 
     def __eq__(self, other):
         if isinstance(other, str):
@@ -230,13 +236,6 @@ class ProcessedType:
 
     def __hash__(self):
         return hash(self.cpp_name)
-
-    @property
-    def basename(self):
-        """
-        Name of type without C++ path.
-        """
-        return self._basename
 
     @property
     def import_string(self) -> str:

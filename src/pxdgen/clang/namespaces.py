@@ -15,6 +15,7 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import clang.cindex
+import os.path
 from typing import Generator
 from .enums import Enumeration
 from .structs import Struct
@@ -290,7 +291,7 @@ class Namespace:
                     child.kind not in Namespace.STATIC_IGNORED_TYPES and
                     (
                         self.recursive or
-                        child.location.file.name in self.valid_headers
+                        os.path.abspath(child.location.file.name) in self.valid_headers
                     )
                    )
         except AttributeError:

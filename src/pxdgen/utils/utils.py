@@ -15,6 +15,7 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import clang.cindex
+import os.path
 
 
 def is_cppclass(cursor: clang.cindex.Cursor) -> bool:
@@ -73,7 +74,7 @@ def find_namespaces(cursor: clang.cindex.Cursor, valid_headers: set = None, curr
     namespaces = list()
 
     for child in cursor.get_children():
-        if (child.kind == clang.cindex.CursorKind.NAMESPACE or is_cppclass(child)) and (valid_headers is None or child.location.file.name in valid_headers):
+        if (child.kind == clang.cindex.CursorKind.NAMESPACE or is_cppclass(child)) and (valid_headers is None or os.path.abspath(child.location.file.name) in valid_headers):
             namespaces.append(child)
 
     for namespace in namespaces:
@@ -94,7 +95,7 @@ def is_function_pointer(ctype: clang.cindex.Type) -> bool:
     """
     if ctype.kind != clang.cindex.TypeKind.POINTER:
         return False
-
+    
     return ctype.get_pointee().kind == clang.cindex.TypeKind.FUNCTIONPROTO
 
 
@@ -260,30 +261,42 @@ def nested_template_type_strings(s: str) -> list:
     in:
 
     Foo[Bar[Baz[int]]]
+    Foo[Bar, Baz[int]]
+    Foo[Bar, Baz]
+    Foo[Bar[int], Baz[int]]
 
     We would need to resolve Foo, Bar, Baz, and int.
     However, sanitize_type_string only extracts Foo
     """
     OB = '<'
     CB = '>'
-    sq_brackets = list()
-    op_brackets = list()
+    dbg = s
+    
+    def _calc_brackets(inner: str):
+        ret = list()
+        op_brackets = list()
+        for i, v in enumerate(inner):
+            if v == OB:
+                op_brackets.append(i)
+            elif v == CB and len(op_brackets) > 0:
+                ret.append((op_brackets.pop(), i))
+                
+        return ret
+    
     ret = list()
+    sq_brackets = _calc_brackets(s)
 
-    for i, v in enumerate(s):
-        if v == OB:
-            op_brackets.append(i)
-        elif v == CB and len(op_brackets) > 0:
-            sq_brackets.append((op_brackets.pop(), i))
-
-    for start, end in sq_brackets:
-        nested = s[start+1:end]
-        next_ob = nested.find(OB)
-
-        if next_ob == -1:
-            ret.append(nested)
+    while OB in s:
+        for start, end in sq_brackets:
+            v = s[start+1:end]
+            if OB in v:
+                continue
+            ret += v.split(',')
+            s = s.replace(OB + v + CB, '')
+            break
         else:
-            ret.append(nested[:next_ob])
+            assert False, "Fatal error processing generic types"
+        sq_brackets = _calc_brackets(s)
 
     return ret
 

@@ -92,17 +92,18 @@ class PXDGen:
 
     def _run_standard(self):
         stream = sys.stdout if not self.opts.output else open(self.opts.output, 'w')
-        valid_headers = {self.opts.header}
+        abs_header = os.path.abspath(self.opts.header)
+        valid_headers = {abs_header}
         tu = self.index.parse(self.opts.header, self.clang_args)
         namespaces = pxdgen.utils.find_namespaces(tu.cursor)
         namespaces[''] = [tu.cursor]
-        resolver = TypeResolver()
+        resolver = TypeResolver(False)
 
         if self.opts.recursive and self.opts.headers:
-            valid_headers |= set(glob.glob(self.opts.headers))
+            valid_headers |= set([os.path.abspath(g) for g in glob.glob(self.opts.headers)])
 
         for key, value in namespaces.items():
-            ns = Namespace(value, self.opts.recursive and not self.opts.headers, key, self.opts.header, valid_headers)
+            ns = Namespace(value, self.opts.recursive and not self.opts.headers, key, os.path.relpath(self.opts.header), valid_headers)
             ns.process_types(resolver)
             namespaces[key] = ns
 
@@ -146,7 +147,7 @@ class PXDGen:
         stream.write(writer.getvalue())
 
     def _preprocess_directory(self, dirname: str) -> tuple:
-        resolver = TypeResolver()
+        resolver = TypeResolver(True)
         all_spaces = dict()
 
         def _r(s):
@@ -158,7 +159,7 @@ class PXDGen:
                         continue
                     print(f"Pre-processing {handle.path}...")
                     tu = self.index.parse(handle.path, self.clang_args)
-                    namespaces = pxdgen.utils.find_namespaces(tu.cursor, {handle.path})
+                    namespaces = pxdgen.utils.find_namespaces(tu.cursor, {os.path.abspath(handle.path)})
                     namespaces[''] = [tu.cursor]
                     for key, value in namespaces.items():
                         if key in all_spaces:
@@ -171,7 +172,7 @@ class PXDGen:
             print(f"Generating type info for namespace {cppath}")
             for header in all_spaces[cppath]:
                 # (cursors, recursive, cpp_path, header_name, valid hdeaders)
-                ns = Namespace(all_spaces[cppath][header], False, cppath, header, {header})
+                ns = Namespace(all_spaces[cppath][header], False, cppath, os.path.relpath(header), {os.path.abspath(header)})
                 all_spaces[cppath][header] = ns
                 ns.process_types(resolver)
 
