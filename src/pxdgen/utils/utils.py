@@ -236,26 +236,10 @@ def sanitize_type_string(s: str) -> str:
 
     s = strip_beg_type_ids(s)
 
-    # try:
-    #     s = s[:s.index('<')]
-    # except ValueError:
-    #     pass
-    #
-    # try:
-    #     s = s[:s.index('[')]
-    # except ValueError:
-    #     pass
-
-    # i_ptr = s.find('*')
-
-    # Removing after * will also remove >C99 restrict
-    # if i_ptr != -1:
-    #     s = s[:i_ptr]
-    #
-    # i_ref = s.find('&')
-    #
-    # if i_ref != -1:
-    #     s = s[:i_ref]
+    try:
+        s = s[:s.index('[')]
+    except ValueError:
+        pass
 
     return s.strip()
 
