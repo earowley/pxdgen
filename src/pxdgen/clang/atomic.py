@@ -44,15 +44,14 @@ class Member:
         if utils.is_function_pointer(t):
             rtype = utils.get_function_pointer_return_type(t)
             atypes = utils.get_function_pointer_arg_types(t)
-            types = [ts for ts in [rtype] + atypes]
+            types = [rtype] + atypes
         else:
-            types = [t.spelling]
+            types = [t]
 
         ret = list()
 
         for t in types:
-            ret += [utils.sanitize_type_string(temp) for temp in utils.nested_template_type_strings(t)]
-            ret.append(utils.sanitize_type_string(t))
+            ret += [utils.sanitize_type_string(temp) for temp in utils.extract_type_strings(t)]
 
         return ret
 

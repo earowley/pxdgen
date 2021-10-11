@@ -193,7 +193,8 @@ class Namespace:
             elif child.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
                 typedef = Typedef(child)
                 base = typedef.base
-                for t in typedef.ctypes:
+                ctypes = typedef.ctypes
+                for t in ctypes:
                     resolver.process_type(t, self.cpp_name)
                 if base and base in unk:
                     if base.kind == clang.cindex.CursorKind.ENUM_DECL:
@@ -217,7 +218,6 @@ class Namespace:
                             yield self._replace_typenames(i, ctypes, resolver)
                     unk.remove(base)
                     continue
-                ctypes = typedef.ctypes
                 yield self._replace_typenames(typedef.declaration, ctypes, resolver)
             elif child.kind in Namespace.FUNCTION_TYPES:
                 func = Function(child)

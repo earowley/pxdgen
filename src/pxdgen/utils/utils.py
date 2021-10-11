@@ -99,7 +99,7 @@ def is_function_pointer(ctype: clang.cindex.Type) -> bool:
     return ctype.get_pointee().kind == clang.cindex.TypeKind.FUNCTIONPROTO
 
 
-def get_function_pointer_return_type(ctype: clang.cindex.Type) -> str:
+def get_function_pointer_return_type(ctype: clang.cindex.Type) -> clang.cindex.Type:
     """
     Gets the return type of a function pointer. Type is not validated,
     use is_function_pointer to validate.
@@ -107,7 +107,7 @@ def get_function_pointer_return_type(ctype: clang.cindex.Type) -> str:
     @param ctype: Clang Type object.
     @return: str.
     """
-    return ctype.get_pointee().get_result().spelling
+    return ctype.get_pointee().get_result()
 
 
 def get_function_pointer_arg_types(ctype: clang.cindex.Type) -> list:
@@ -118,7 +118,7 @@ def get_function_pointer_arg_types(ctype: clang.cindex.Type) -> list:
     @param ctype: Clang Type object.
     @return: list.
     """
-    return [arg.spelling for arg in ctype.get_pointee().argument_types()]
+    return [arg for arg in ctype.get_pointee().argument_types()]
 
 
 def get_template_params(cursor: clang.cindex.Cursor) -> str:
@@ -226,77 +226,69 @@ def sanitize_type_string(s: str) -> str:
     @param s: Input type string.
     @return: Sanitized type string.
     """
-    s = s.replace("unsigned ", '').replace("signed ", '').replace("const ", '').replace("volatile ", '')
+    s = s.replace("unsigned ", '')\
+         .replace("signed ", '')\
+         .replace("const ", '')\
+         .replace("volatile ", '')\
+         .replace("restrict ", '')\
+         .replace('*', '')\
+         .replace('&', '')
+
     s = strip_beg_type_ids(s)
 
-    try:
-        s = s[:s.index('<')]
-    except ValueError:
-        pass
+    # try:
+    #     s = s[:s.index('<')]
+    # except ValueError:
+    #     pass
+    #
+    # try:
+    #     s = s[:s.index('[')]
+    # except ValueError:
+    #     pass
 
-    try:
-        s = s[:s.index('[')]
-    except ValueError:
-        pass
-
-    i_ptr = s.find('*')
+    # i_ptr = s.find('*')
 
     # Removing after * will also remove >C99 restrict
-    if i_ptr != -1:
-        s = s[:i_ptr]
-
-    i_ref = s.find('&')
-
-    if i_ref != -1:
-        s = s[:i_ref]
+    # if i_ptr != -1:
+    #     s = s[:i_ptr]
+    #
+    # i_ref = s.find('&')
+    #
+    # if i_ref != -1:
+    #     s = s[:i_ref]
 
     return s.strip()
 
 
-def nested_template_type_strings(s: str) -> list:
+def extract_type_strings(t: clang.cindex.Type) -> list:
     """
     The purpose of this function is to extract
-    the type strings of nested template values.
-    sanitize_type_string omits these. For example,
-    in:
+    the type strings within a more complex expression.
+    For example, in the examples:
 
-    Foo[Bar[Baz[int]]]
-    Foo[Bar, Baz[int]]
-    Foo[Bar, Baz]
-    Foo[Bar[int], Baz[int]]
+    Foo<Bar<Baz<int>>>
+    Foo<Bar, Baz<int>>
+    Foo<Bar, Baz, int>
+    Foo<Bar<int>, Baz<int>>
 
-    We would need to resolve Foo, Bar, Baz, and int.
-    However, sanitize_type_string only extracts Foo
+    Foo, Bar, Baz, and int need to be resolved.
     """
     OB = '<'
-    CB = '>'
-    dbg = s
-    
-    def _calc_brackets(inner: str):
-        ret = list()
-        op_brackets = list()
-        for i, v in enumerate(inner):
-            if v == OB:
-                op_brackets.append(i)
-            elif v == CB and len(op_brackets) > 0:
-                ret.append((op_brackets.pop(), i))
-                
-        return ret
-    
-    ret = list()
-    sq_brackets = _calc_brackets(s)
+    tmpl_arg_count = t.get_num_template_arguments()
 
-    while OB in s:
-        for start, end in sq_brackets:
-            v = s[start+1:end]
-            if OB in v:
-                continue
-            ret += v.split(',')
-            s = s.replace(OB + v + CB, '')
-            break
-        else:
-            assert False, "Fatal error processing generic types"
-        sq_brackets = _calc_brackets(s)
+    if tmpl_arg_count == 0:
+        return [t.spelling]
+
+    ret = list()
+
+    for i in range(tmpl_arg_count):
+        ret += extract_type_strings(t.get_template_argument_type(i))
+
+    i = t.spelling.find(OB)
+    if i == -1:
+        ret.append(t.spelling)
+    else:
+        ret.append(t.spelling[:i])
 
     return ret
 
