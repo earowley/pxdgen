@@ -100,7 +100,8 @@ class PXDGen:
         resolver = TypeResolver(False)
 
         if self.opts.recursive and self.opts.headers:
-            valid_headers |= set([os.path.abspath(g) for g in glob.glob(self.opts.headers)])
+            for glb in self.opts.headers:
+                valid_headers |= set([os.path.abspath(g) for g in glob.glob(glb)])
 
         for key, value in namespaces.items():
             ns = Namespace(value, self.opts.recursive and not self.opts.headers, key, os.path.relpath(self.opts.header), valid_headers)
@@ -189,35 +190,41 @@ def main():
 
     argp = argparse.ArgumentParser(description="Converts a C/C++ header file to a pxd file")
     argp.add_argument("header",
-                        help="Path to C/C++ header or directory file to parse")
+                        help="Path to C/C++ header or directory (if using -D) to parse")
     argp.add_argument("-o", "--output",
-                        help="Path to output file or directory, if any")
+                        help="Path to output file or directory (defaults to stdout)")
     argp.add_argument("-r", "--recursive-includes",
                         action="store_true",
-                        help="Include declarations from other included headers",
+                        help="Include declarations from headers #included by the preprocessor",
                         dest="recursive")
+    argp.add_argument("-x", "--language",
+                      help="Force Clang to use the specified language for interpretation")
     argp.add_argument("-I", "--include",
                         action="append",
                         help="Add a directory to Clang's include path")
+    argp.add_argument("-L", "--libclang-path",
+                      dest="libs",
+                      help="Specify the path to a directory containing libclang and its dependencies")
+    argp.add_argument("-D", "--directory",
+                      action="store_true",
+                      help="Use pxdgen to parse a directory tree and set namespace output mode")
     argp.add_argument("-H", "--headers",
-                      help="Specify a glob term to identify valid headers to parse")
+                      action="append",
+                      default=[],
+                      help="Whitelist specified headers with a glob term (useful for filtering -r)")
+    argp.add_argument("-N", "--namespaces",
+                      action="append",
+                      default=[],
+                      help="Whitelist specified namespaces with an fnmatch term (useful for filtering -r)")
     argp.add_argument("-W", "--warning-level",
                       type=int,
                       default=1,
-                      help="Flag to set the warning level of the current run")
-    argp.add_argument("-L", "--libclang-path",
-                      dest="libs",
-                      help="Specify a path to a directory containing libclang and its dependencies")
-    argp.add_argument("-x", "--language",
-                      help="Force Clang to use the specified language for interpretation, such as 'c++'")
-    argp.add_argument("-D", "--directory",
-                      action="store_true",
-                      help="Use pxdgen to parse a directory tree")
+                      help="Set the warning level of the current process")
     argp.add_argument("-f", "--flag",
                       action="append",
                       dest="flags",
                       default=[],
-                      help="Set a pxdgen flag to further tune the program output")
+                      help="Set a flag to further tune the program output")
 
     opts = argp.parse_args(args)
     proc = PXDGen(opts)
