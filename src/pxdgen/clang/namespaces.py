@@ -288,8 +288,7 @@ class Namespace:
             return False
         try:
             return (
-                    child.kind not in Namespace.STATIC_IGNORED_TYPES and
-                    (
+                    child.kind not in Namespace.STATIC_IGNORED_TYPES and (
                         self.recursive or
                         os.path.abspath(child.location.file.name) in self.valid_headers
                     )

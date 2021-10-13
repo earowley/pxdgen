@@ -14,8 +14,10 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import clang.cindex
 import os.path
+import fnmatch
+
+import clang.cindex
 
 
 def is_cppclass(cursor: clang.cindex.Cursor) -> bool:
@@ -35,16 +37,19 @@ def is_cppclass(cursor: clang.cindex.Cursor) -> bool:
         return True
 
     for child in cursor.get_children():
-        if child.kind not in  ANON + (clang.cindex.CursorKind.FIELD_DECL,):
+        if child.kind not in ANON + (clang.cindex.CursorKind.FIELD_DECL,):
             return True
 
     return False
 
 
-def find_namespaces(cursor: clang.cindex.Cursor, valid_headers: set = None, curr_name='') -> dict:
+def find_namespaces(cursor: clang.cindex.Cursor, valid_headers: set = None, valid_namespaces: list = None, primary_header: str = None,  curr_name='') -> dict:
     """
     Finds namespaces, given the top-level cursor of a header file.
     @param cursor: Clang Cursor.
+    @param valid_headers: Header whitelist set for filtering
+    @param valid_namespaces: Namespace fnmatch term for whitelisting
+    @param primary_header: All declarations from this header are included, regarless of whitelists
     @param curr_name: Recursive helper, leave as-is.
     @return: Dictionary in the following form:
     {
@@ -61,6 +66,9 @@ def find_namespaces(cursor: clang.cindex.Cursor, valid_headers: set = None, curr
 
             l += d2[key]
 
+    def _any_ns(t):
+        return any(fnmatch.fnmatch(t, vns) for vns in valid_namespaces)
+
     # Valid kinds that can be represented as a namespace in Cython
     # excluding Namespace
     CLASS_KINDS = (
@@ -74,11 +82,16 @@ def find_namespaces(cursor: clang.cindex.Cursor, valid_headers: set = None, curr
     namespaces = list()
 
     for child in cursor.get_children():
-        if (child.kind == clang.cindex.CursorKind.NAMESPACE or is_cppclass(child)) and (valid_headers is None or os.path.abspath(child.location.file.name) in valid_headers):
+        add_cond = all((
+            child.kind == clang.cindex.CursorKind.NAMESPACE or is_cppclass(child),
+            valid_headers is None or os.path.abspath(child.location.file.name) in valid_headers,
+            valid_namespaces is None or (child.location.file and (os.path.abspath(child.location.file.name) == primary_header)) or _any_ns(child.spelling)
+        ))
+        if add_cond:
             namespaces.append(child)
 
     for namespace in namespaces:
-        _update(ret, find_namespaces(namespace, valid_headers, curr_name + "::" + namespace.spelling))
+        _update(ret, find_namespaces(namespace, valid_headers, valid_namespaces, primary_header, curr_name + "::" + namespace.spelling))
 
     if cursor.kind in CLASS_KINDS:
         _update(ret, {curr_name.strip("::"): [cursor]})
@@ -307,4 +320,3 @@ def convert_dialect(s: str, bool_replace: bool = False) -> str:
         ret = ret.replace("bool", "bint")
 
     return ret
-

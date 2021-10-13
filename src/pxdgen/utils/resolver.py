@@ -143,8 +143,8 @@ class TypeResolver:
             p_type = self.known_types.get(type_string, None)
             if p_type:
                 if (p_type.package_path not in IGNORE_IMPORTS and 
-                    p_type.cpp_space != current_namespace and
-                    p_type.importable):
+                        p_type.cpp_space != current_namespace and
+                        p_type.importable):
                     self.imports.add(p_type.import_string)
                     ret.append((type_string, p_type.import_name))
                 else:
@@ -157,8 +157,8 @@ class TypeResolver:
                         break
                 if p_type:
                     if (p_type.package_path not in IGNORE_IMPORTS and 
-                        p_type.cpp_space != current_namespace and
-                        p_type.importable):
+                            p_type.cpp_space != current_namespace and
+                            p_type.importable):
                         self.imports.add(p_type.import_string)
                         ret.append((type_string, p_type.import_name))
                     else:

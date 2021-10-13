@@ -18,9 +18,11 @@ import argparse
 import sys
 import os
 import os.path
-import clang.cindex
-import pxdgen.utils
 import glob
+
+import clang.cindex
+
+import pxdgen.utils
 import pxdgen.utils.warning as warnings
 from pxdgen.config import set_config, Setting
 from pxdgen.utils import TypeResolver
@@ -31,6 +33,7 @@ from pxdgen.clang.namespaces import Namespace
 FLAG_NOIMPORT = "noimport"
 FLAG_AUTODEFINE = "autodefine"
 FLAG_FORWARD_DECL = "emitfwdecl"
+FLAG_AUTOIMPORT = "autoimport"
 
 
 class PXDGen:
@@ -95,16 +98,23 @@ class PXDGen:
         abs_header = os.path.abspath(self.opts.header)
         valid_headers = {abs_header}
         tu = self.index.parse(self.opts.header, self.clang_args)
-        namespaces = pxdgen.utils.find_namespaces(tu.cursor)
-        namespaces[''] = [tu.cursor]
         resolver = TypeResolver(False)
+        vld_ns = None
 
-        if self.opts.recursive and self.opts.headers:
-            for glb in self.opts.headers:
-                valid_headers |= set([os.path.abspath(g) for g in glob.glob(glb)])
+        if self.opts.recursive:
+            if self.opts.headers:
+                for glb in self.opts.headers:
+                    valid_headers |= set([os.path.abspath(g) for g in glob.glob(glb)])
+            else:
+                valid_headers = None
+            if self.opts.namespaces:
+                vld_ns = self.opts.namespaces
+
+        namespaces = pxdgen.utils.find_namespaces(tu.cursor, valid_headers, vld_ns, abs_header)
+        namespaces[''] = [tu.cursor]
 
         for key, value in namespaces.items():
-            ns = Namespace(value, self.opts.recursive and not self.opts.headers, key, os.path.relpath(self.opts.header), valid_headers)
+            ns = Namespace(value, key != '' or (self.opts.recursive and not self.opts.headers), key, os.path.relpath(self.opts.header), valid_headers)
             ns.process_types(resolver)
             namespaces[key] = ns
 
@@ -138,12 +148,17 @@ class PXDGen:
             stream.write("#  PXDGEN IMPORTS\n")
             stream.write('\n'.join(resolver.drain_imports()))
             stream.write('\n\n')
-        if resolver.unknown_imports and FLAG_AUTODEFINE in self.flags:
-            stream.write("#  PXDGEN AUTO-DEFINED TYPES\n")
-            stream.write("cdef extern from *:\n")
-            for pt in resolver.drain_unknown_imports():
-                stream.write("    ctypedef struct %s:\n        pass\n" % pt.basename)
-            stream.write("\n\n")
+        if resolver.unknown_imports:
+            if FLAG_AUTODEFINE in self.flags:
+                stream.write("#  PXDGEN AUTO-DEFINED TYPES\n")
+                stream.write("cdef extern from *:\n")
+                for pt in resolver.drain_unknown_imports():
+                    stream.write("    ctypedef struct %s:\n        pass\n" % pt.basename)
+                stream.write("\n\n")
+            elif FLAG_AUTOIMPORT in self.flags:
+                stream.write("#  PXDGEN AUTO-IMPORTS\n")
+                for pt in resolver.drain_unknown_imports():
+                    stream.write(pt.import_string)
 
         stream.write(writer.getvalue())
 
@@ -159,8 +174,9 @@ class PXDGen:
                     if not handle.name.endswith(".h") and not handle.name.endswith(".hpp"):
                         continue
                     print(f"Pre-processing {handle.path}...")
+                    main_header = os.path.abspath(handle.path)
                     tu = self.index.parse(handle.path, self.clang_args)
-                    namespaces = pxdgen.utils.find_namespaces(tu.cursor, {os.path.abspath(handle.path)})
+                    namespaces = pxdgen.utils.find_namespaces(tu.cursor, {main_header})
                     namespaces[''] = [tu.cursor]
                     for key, value in namespaces.items():
                         if key in all_spaces:
@@ -172,8 +188,14 @@ class PXDGen:
         for cppath in all_spaces:
             print(f"Generating type info for namespace {cppath}")
             for header in all_spaces[cppath]:
-                # (cursors, recursive, cpp_path, header_name, valid hdeaders)
-                ns = Namespace(all_spaces[cppath][header], False, cppath, os.path.relpath(header), {os.path.abspath(header)})
+                # (cursors, recursive, cpp_path, header_name, valid headers)
+                ns = Namespace(
+                    all_spaces[cppath][header],
+                    False,
+                    cppath,
+                    os.path.relpath(header),
+                    {os.path.abspath(header)}
+                )
                 all_spaces[cppath][header] = ns
                 ns.process_types(resolver)
 
@@ -211,11 +233,11 @@ def main():
     argp.add_argument("-H", "--headers",
                       action="append",
                       default=[],
-                      help="Whitelist specified headers with a glob term (useful for filtering -r)")
+                      help="Whitelist specified headers with a glob term (for filtering -r)")
     argp.add_argument("-N", "--namespaces",
                       action="append",
                       default=[],
-                      help="Whitelist specified namespaces with an fnmatch term (useful for filtering -r)")
+                      help="Whitelist specified namespaces with an fnmatch term (for filtering -r)")
     argp.add_argument("-W", "--warning-level",
                       type=int,
                       default=1,
