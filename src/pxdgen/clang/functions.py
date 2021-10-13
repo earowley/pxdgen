@@ -84,7 +84,13 @@ class Function:
         ret = Member.basic_member_ctypes(self.cursor.result_type)
         template_params = utils.get_template_params_as_list(self.cursor)
 
-        for a in self.cursor.get_arguments():
+        # get_arguments() yields nothing for function templates as of libclang 12.0
+        if self.cursor.kind == clang.cindex.CursorKind.FUNCTION_TEMPLATE:
+            _it = (c for c in self.cursor.get_children() if c.kind == clang.cindex.CursorKind.PARM_DECL)
+        else:
+            _it = self.cursor.get_arguments()
+
+        for a in _it:
             ret += Member.basic_member_ctypes(a.type)
 
         if template_params:

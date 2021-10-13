@@ -250,6 +250,7 @@ class Namespace:
         based on what is defined in the TypeResolver
         """
         ret = line
+        # cpp_space = "::".join((self.cpp_name, class_name)) if class_name is not None else self.cpp_name
         replacements = resolver.add_imports_from_types(names, self.cpp_name)
 
         for old, new in replacements:

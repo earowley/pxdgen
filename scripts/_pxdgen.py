@@ -159,6 +159,8 @@ class PXDGen:
                 stream.write("#  PXDGEN AUTO-IMPORTS\n")
                 for pt in resolver.drain_unknown_imports():
                     stream.write(pt.import_string)
+                    stream.write('\n')
+                stream.write("\n\n")
 
         stream.write(writer.getvalue())
 

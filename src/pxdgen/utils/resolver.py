@@ -167,12 +167,12 @@ class TypeResolver:
             p_type = self.unknown_types.get(type_string, None)
             assert p_type is not None, "Type %s is not known or unknown" % type_string
             self.unknown_imports.add(p_type)
-            unk_fallback = type_string
-            if current_namespace:
-                unk_fallback = unk_fallback.replace("%s::" % current_namespace, '')
-            ret.append((type_string, unk_fallback.replace("::", '.')))
+            # unk_fallback = type_string
+            # if current_namespace:
+            #    unk_fallback = unk_fallback.replace("%s::" % current_namespace, '')
+            ret.append((type_string, p_type.import_name))
 
-        return ret
+        return sorted(ret, key=lambda v: len(v[0]), reverse=True)
 
     def drain_imports(self) -> Generator[str, None, None]:
         """

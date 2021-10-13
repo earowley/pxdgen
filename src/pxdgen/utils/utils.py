@@ -82,10 +82,11 @@ def find_namespaces(cursor: clang.cindex.Cursor, valid_headers: set = None, vali
     namespaces = list()
 
     for child in cursor.get_children():
+        cpp_name = curr_name + "::" + child.spelling
         add_cond = all((
             child.kind == clang.cindex.CursorKind.NAMESPACE or is_cppclass(child),
             valid_headers is None or os.path.abspath(child.location.file.name) in valid_headers,
-            valid_namespaces is None or (child.location.file and (os.path.abspath(child.location.file.name) == primary_header)) or _any_ns(child.spelling)
+            valid_namespaces is None or (child.location.file and (os.path.abspath(child.location.file.name) == primary_header)) or _any_ns(cpp_name.strip("::"))
         ))
         if add_cond:
             namespaces.append(child)
@@ -245,7 +246,8 @@ def sanitize_type_string(s: str) -> str:
          .replace("volatile ", '')\
          .replace("restrict ", '')\
          .replace('*', '')\
-         .replace('&', '')
+         .replace('&', '')\
+         .replace("typename ", '')
 
     s = strip_beg_type_ids(s)
 
@@ -314,7 +316,7 @@ def convert_dialect(s: str, bool_replace: bool = False) -> str:
         ret = ret.replace("noexcept", '')
 
     ret = ret.replace("_Bool", "bint").replace("bool ", "bint ").replace("bool,", "bint,").replace("(bool)", "(bint)")
-    ret = ret.replace("restrict ", '').replace("volatile ", '')
+    ret = ret.replace("restrict ", '').replace("volatile ", '').replace("typename ", '')
 
     if bool_replace:
         ret = ret.replace("bool", "bint")
