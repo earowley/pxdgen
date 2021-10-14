@@ -275,7 +275,7 @@ def extract_type_strings(t: clang.cindex.Type) -> list:
     OB = '<'
     tmpl_arg_count = t.get_num_template_arguments()
 
-    if tmpl_arg_count == 0:
+    if tmpl_arg_count <= 0:
         return [t.spelling]
 
     ret = list()
@@ -290,6 +290,46 @@ def extract_type_strings(t: clang.cindex.Type) -> list:
         ret.append(t.spelling[:i])
 
     return ret
+
+
+def full_type_string(t: clang.cindex.Type) -> str:
+    """
+    Get the full type string with expanded
+    C++ names.
+
+    @param t:
+    @return:
+    """
+    OB = '<'
+    CB = '>'
+    n = t.get_num_template_arguments()
+
+    if n <= 0:
+        return t.spelling
+
+    i = t.spelling.find(OB)
+
+    if i == -1:
+        base = t.spelling
+    else:
+        base = t.spelling[:i]
+
+    i = t.spelling.rfind(CB)
+
+    if i == -1:
+        ex = ''
+    else:
+        ex = t.spelling[i+1:]
+
+    args = list()
+
+    for i in range(n):
+        args.append(full_type_string(t.get_template_argument_type(i)))
+
+    if len(args):
+        return "%s[%s]%s" % (base, ','.join(args), ex)
+
+    return base
 
 
 def convert_dialect(s: str, bool_replace: bool = False) -> str:
