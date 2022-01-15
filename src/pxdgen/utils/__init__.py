@@ -16,4 +16,3 @@
 
 from .utils import *
 from .tab_writer import *
-from .resolver import *

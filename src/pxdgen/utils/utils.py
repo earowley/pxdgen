@@ -15,9 +15,74 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import os.path
-import fnmatch
-
 import clang.cindex
+from typing import List, Dict, Tuple, Callable, Optional
+from ..constants import *
+
+
+def find_namespaces(cursor: clang.cindex.Cursor, valid_headers: set = None,
+                    **kwargs) -> Dict[str, List[clang.cindex.Cursor]]:
+    """
+    Finds namespaces, given the top-level cursor of a header file.
+    @param cursor: Clang Cursor.
+    @param valid_headers: Header whitelist set for filtering
+    @return: Dictionary in the following form:
+    {
+        "A::B::C": [clang.cindex.Cursor c1, clang.cindex.Cursor c2 ...],
+        ...
+    }
+    """
+
+    def _update(d1, d2):
+        for key in d2:
+            l = d1.get(key, None)
+            if l is None:
+                l = list()
+                d1[key] = l
+
+            l += d2[key]
+
+    ret = dict()
+    namespaces = list()
+    curr_name = kwargs.get("curr_name", '')
+
+    for child in cursor.get_children():
+        add_cond = all((
+            child.kind == clang.cindex.CursorKind.NAMESPACE or is_cppclass(child),
+            valid_headers is None or os.path.abspath(child.location.file.name) in valid_headers
+        ))
+        if add_cond:
+            namespaces.append(child)
+
+    for namespace in namespaces:
+        _update(ret, find_namespaces(namespace, valid_headers, curr_name=curr_name + "::" + namespace.spelling))
+
+    if cursor.kind in SPACE_KINDS:
+        _update(ret, {curr_name.strip("::"): [cursor]})
+
+    return ret
+
+
+def containing_space(cursor: clang.cindex.Cursor, pred: Callable) -> str:
+    """
+    Traverse the tree of a cursor and create an address from each
+    Node that returns True from pred.
+
+    @param cursor: The root Node.
+    @param pred: The predicate to test each Node against.
+    @return: A C++-like address.
+    """
+    parts = list()
+    parent = cursor.lexical_parent
+
+    while parent is not None:
+        if pred(parent):
+            parts.append(parent.spelling)
+        parent = parent.lexical_parent
+
+    parts.reverse()
+
+    return "::".join(parts)
 
 
 def is_cppclass(cursor: clang.cindex.Cursor) -> bool:
@@ -31,9 +96,16 @@ def is_cppclass(cursor: clang.cindex.Cursor) -> bool:
     # There can be anonymous structs and enumerations as fields
     ANON = (clang.cindex.CursorKind.STRUCT_DECL, clang.cindex.CursorKind.ENUM_DECL, clang.cindex.CursorKind.UNION_DECL)
     # return cursor.kind != clang.cindex.CursorKind.STRUCT_DECL or any((mem.kind not in CTYPES for mem in cursor.get_children()))
-    if cursor.kind not in (clang.cindex.CursorKind.CLASS_DECL, clang.cindex.CursorKind.CLASS_TEMPLATE, clang.cindex.CursorKind.STRUCT_DECL):
+    if cursor.kind not in (
+        clang.cindex.CursorKind.CLASS_DECL,
+        clang.cindex.CursorKind.CLASS_TEMPLATE,
+        clang.cindex.CursorKind.STRUCT_DECL
+    ):
         return False
-    if cursor.kind in (clang.cindex.CursorKind.CLASS_DECL, clang.cindex.CursorKind.CLASS_TEMPLATE):
+    if cursor.kind in (
+            clang.cindex.CursorKind.CLASS_DECL,
+            clang.cindex.CursorKind.CLASS_TEMPLATE
+    ):
         return True
 
     for child in cursor.get_children():
@@ -43,61 +115,50 @@ def is_cppclass(cursor: clang.cindex.Cursor) -> bool:
     return False
 
 
-def find_namespaces(cursor: clang.cindex.Cursor, valid_headers: set = None, valid_namespaces: list = None, primary_header: str = None,  curr_name='') -> dict:
+def is_constructor(cursor: clang.cindex.Cursor) -> bool:
     """
-    Finds namespaces, given the top-level cursor of a header file.
-    @param cursor: Clang Cursor.
-    @param valid_headers: Header whitelist set for filtering
-    @param valid_namespaces: Namespace fnmatch term for whitelisting
-    @param primary_header: All declarations from this header are included, regarless of whitelists
-    @param curr_name: Recursive helper, leave as-is.
-    @return: Dictionary in the following form:
-    {
-        "A::B::C": [clang.cindex.Cursor c1, clang.cindex.Cursor c2 ...]
-    }
+    Whether the cursor represents a constructor. Needed
+    because constructors can also be function templates.
+
+    @param cursor: Any Clang cursor.
+    @return: Whether the cursor represents a constructor.
     """
+    if cursor.kind == clang.cindex.CursorKind.CONSTRUCTOR:
+        return True
 
-    def _update(d1, d2):
-        for key in d2:
-            l = d1.get(key, None)
-            if l is None:
-                l = list()
-                d1[key] = l
+    if cursor.kind in METHOD_KINDS:
+        if cursor.result_type.spelling == "void":
+            container = cursor.lexical_parent
 
-            l += d2[key]
+            if container is None:
+                return False
 
-    def _any_ns(t):
-        return any(fnmatch.fnmatch(t, vns) for vns in valid_namespaces)
+            func_name = cursor.spelling
 
-    # Valid kinds that can be represented as a namespace in Cython
-    # excluding Namespace
-    CLASS_KINDS = (
-                   clang.cindex.CursorKind.STRUCT_DECL,
-                   clang.cindex.CursorKind.CLASS_DECL,
-                   clang.cindex.CursorKind.CLASS_TEMPLATE,
-                   clang.cindex.CursorKind.NAMESPACE
-    )
+            try:
+                func_name = func_name[:func_name.index("<")].strip()
+            except ValueError:
+                pass
 
-    ret = dict()
-    namespaces = list()
+            if func_name == container.spelling:
+                return True
 
-    for child in cursor.get_children():
-        cpp_name = curr_name + "::" + child.spelling
-        add_cond = all((
-            child.kind == clang.cindex.CursorKind.NAMESPACE or is_cppclass(child),
-            valid_headers is None or os.path.abspath(child.location.file.name) in valid_headers,
-            valid_namespaces is None or (child.location.file and (os.path.abspath(child.location.file.name) == primary_header)) or _any_ns(cpp_name.strip("::"))
-        ))
-        if add_cond:
-            namespaces.append(child)
+    return False
 
-    for namespace in namespaces:
-        _update(ret, find_namespaces(namespace, valid_headers, valid_namespaces, primary_header, curr_name + "::" + namespace.spelling))
 
-    if cursor.kind in CLASS_KINDS:
-        _update(ret, {curr_name.strip("::"): [cursor]})
+def walk_pointer(t: clang.cindex.Type) -> Tuple[int, clang.cindex.Type]:
+    """
+    Follow a pointer to its underlying type.
 
-    return ret
+    @param t: The pointer to follow. If t is not a pointer, t will be returned.
+    @return: The underlying type.
+    """
+    pointers = 0
+    while t.kind == clang.cindex.TypeKind.POINTER:
+        t = t.get_pointee()
+        pointers += 1
+
+    return pointers, t
 
 
 def is_function_pointer(ctype: clang.cindex.Type) -> bool:
@@ -109,8 +170,10 @@ def is_function_pointer(ctype: clang.cindex.Type) -> bool:
     """
     if ctype.kind != clang.cindex.TypeKind.POINTER:
         return False
-    
-    return ctype.get_pointee().kind == clang.cindex.TypeKind.FUNCTIONPROTO
+
+    _, result = walk_pointer(ctype)
+
+    return result.kind == clang.cindex.TypeKind.FUNCTIONPROTO
 
 
 def get_function_pointer_return_type(ctype: clang.cindex.Type) -> clang.cindex.Type:
@@ -121,10 +184,11 @@ def get_function_pointer_return_type(ctype: clang.cindex.Type) -> clang.cindex.T
     @param ctype: Clang Type object.
     @return: str.
     """
-    return ctype.get_pointee().get_result()
+    _, result = walk_pointer(ctype)
+    return result.get_result()
 
 
-def get_function_pointer_arg_types(ctype: clang.cindex.Type) -> list:
+def get_function_pointer_arg_types(ctype: clang.cindex.Type) -> List[clang.cindex.Type]:
     """
     Gets the argument types of a function pointer. Type is not validated,
     use is_function_pointer to validate.
@@ -132,7 +196,8 @@ def get_function_pointer_arg_types(ctype: clang.cindex.Type) -> list:
     @param ctype: Clang Type object.
     @return: list.
     """
-    return [arg for arg in ctype.get_pointee().argument_types()]
+    _, result = walk_pointer(ctype)
+    return [arg for arg in result.argument_types()]
 
 
 def get_template_params(cursor: clang.cindex.Cursor) -> str:
@@ -141,38 +206,143 @@ def get_template_params(cursor: clang.cindex.Cursor) -> str:
     of a Cursor.
 
     @param cursor: Any Cursor.
-    @return: Cython template string, like [T, U].
+    @return: Cython template string, like "[T, U]".
     """
-    VALID = (
-        clang.cindex.CursorKind.TEMPLATE_TYPE_PARAMETER,
-        clang.cindex.CursorKind.TEMPLATE_NON_TYPE_PARAMETER
-    )
+
     typenames = list()
 
     for c in cursor.get_children():
-        if c.kind in VALID:
+        if c.kind in TEMPLATE_KINDS:
             typenames.append(c.spelling)
 
     if not len(typenames):
         return ''
 
-    return "[%s]" % ', '.join(typenames)
+    return f"[{', '.join(typenames)}]"
 
 
-def get_template_params_as_list(cursor: clang.cindex.Cursor) -> list:
+def get_template_params_as_list(cursor: clang.cindex.Cursor) -> List[str]:
     """
     Returns a list containing template parameters
     of a Cursor.
 
     @param cursor: Any Cursor.
-    @return: A Python list like [T, U].
+    @return: A Python list like ['T', 'U'].
     """
-    VALID = (
-        clang.cindex.CursorKind.TEMPLATE_TYPE_PARAMETER,
-        clang.cindex.CursorKind.TEMPLATE_NON_TYPE_PARAMETER
+    return [c.spelling for c in cursor.get_children() if c.kind in TEMPLATE_KINDS]
+
+
+def get_relative_type_name(importer: clang.cindex.Cursor, importee: clang.cindex.Cursor) -> str:
+    """
+    How an imported type name appears with respect to another type.
+
+    @param importer: The reference type declaration.
+    @param importee: The imported type declaration.
+    @return: The string following Cython syntax.
+    """
+    importer_space = containing_space(importer, lambda p: p.kind in SPACE_KINDS)
+    importee_space = containing_space(importee, lambda p: p.kind in SPACE_KINDS)
+
+    if importer_space == importee_space or f"{importee_space}::{importee.spelling}".strip("::") in IGNORED_IMPORTS:
+        return importee.spelling
+
+    importer_home = containing_space(importer, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE)
+    importee_home = containing_space(importee, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE)
+    importee_dot = containing_space(importee, lambda p: p.kind != clang.cindex.CursorKind.NAMESPACE).split("::")[1:]
+    importee_dot.append(importee.spelling)
+
+    if importer_home == importee_home:
+        # If importee is toplevel, it is visible from everywhere in the namespace
+        if importee_home == importee_space:
+            return importee.spelling
+        return '.'.join(importee_dot)
+    else:
+        return (
+            importee_home.replace("::", '_') +
+            '_' + '.'.join(importee_dot)
+        )
+
+
+def get_import_string(importer: clang.cindex.Cursor, importee: clang.cindex.Cursor) -> Optional[str]:
+    """
+    Calculates an import string given two reference cursors.
+
+    @param importer: The reference type declaration.
+    @param importee: The imported type declaration.
+    @return: The import string following Cython syntax.
+    """
+    importer_home = containing_space(importer, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE)
+    importee_home = containing_space(importee, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE)
+    importee_space = containing_space(importee, lambda p: p.kind in SPACE_KINDS)
+
+    if importer_home == importee_home or f"{importee_space}::{importee.spelling}".strip("::") in IGNORED_IMPORTS:
+        return None
+
+    importee_dot = containing_space(importee, lambda p: p.kind != clang.cindex.CursorKind.NAMESPACE).split("::")[1:]
+    importee_dot.append(importee.spelling)
+
+    return "from {} cimport {} as {}".format(
+        importee_home.replace('::', '.'),
+        importee_dot[0],
+        importee_home.replace('::', '_') + '_' + importee_dot[0]
     )
 
-    return [c.spelling for c in cursor.get_children() if c.kind in VALID]
+
+def full_type_repr(ctype: clang.cindex.Type, ref_cursor: clang.cindex.Cursor) -> str:
+    """
+    Get the full type string from an existing type.
+
+    @param ctype: The type to convert.
+    @param ref_cursor: A reference space to modify output, see example.
+    @return: The full type string.
+    Examples:
+    Case: string<vector<int>>, ref_space = ''
+    Returns: std::string<std::vector<int>>
+    Case foo::bar, where ref_cursor == foo
+    Returns: bar
+    """
+    EXPANDABLE = (
+        clang.cindex.TypeKind.ELABORATED,
+        clang.cindex.TypeKind.UNEXPOSED
+    )
+
+    EXPANDABLE_CURSORS = (
+        clang.cindex.CursorKind.CLASS_DECL,
+        clang.cindex.CursorKind.CLASS_TEMPLATE,
+        clang.cindex.CursorKind.STRUCT_DECL
+    )
+
+    def finalize(subtype: clang.cindex.Type):
+        decl = subtype.get_declaration()
+
+        if decl.kind == clang.cindex.CursorKind.NO_DECL_FOUND:
+            return subtype.spelling
+
+        return get_relative_type_name(ref_cursor, decl)
+
+    if ctype.kind == clang.cindex.TypeKind.POINTER:
+        ndim, ctype = walk_pointer(ctype)
+        return full_type_repr(ctype, ref_cursor) + '*' * ndim
+    elif ctype.kind == clang.cindex.TypeKind.LVALUEREFERENCE:
+        return full_type_repr(ctype.get_pointee(), ref_cursor) + '&'
+    elif ctype.kind == clang.cindex.TypeKind.RVALUEREFERENCE:
+        return full_type_repr(ctype.get_pointee(), ref_cursor) + "&&"
+
+    nargs = ctype.get_num_template_arguments()
+
+    if (
+        ctype.kind not in EXPANDABLE or
+        ctype.get_declaration().kind not in EXPANDABLE_CURSORS or
+        nargs <= 0
+    ):
+        return finalize(ctype)
+
+    params = list()
+
+    for i in range(nargs):
+        params.append(full_type_repr(ctype.get_template_argument_type(i), ref_cursor))
+
+    return f"{finalize(ctype)}<{', '.join(params)}>"
 
 
 def strip_type_ids(cursor: clang.cindex.Cursor) -> str:
@@ -231,107 +401,6 @@ def strip_beg_type_ids(s: str) -> str:
     return s
 
 
-def sanitize_type_string(s: str) -> str:
-    """
-    Prepares a type string for submission to resolver.
-    Removes extraneous adjectives from C builtin types
-    like signedness and remove generic information.
-
-    @param s: Input type string.
-    @return: Sanitized type string.
-    """
-    s = s.replace("unsigned ", '')\
-         .replace("signed ", '')\
-         .replace("const ", '')\
-         .replace("volatile ", '')\
-         .replace("restrict ", '')\
-         .replace('*', '')\
-         .replace('&', '')\
-         .replace("typename ", '')
-
-    s = strip_beg_type_ids(s)
-
-    try:
-        s = s[:s.index('[')]
-    except ValueError:
-        pass
-
-    return s.strip()
-
-
-def extract_type_strings(t: clang.cindex.Type) -> list:
-    """
-    The purpose of this function is to extract
-    the type strings within a more complex expression.
-    For example, in the examples:
-
-    Foo<Bar<Baz<int>>>
-    Foo<Bar, Baz<int>>
-    Foo<Bar, Baz, int>
-    Foo<Bar<int>, Baz<int>>
-
-    Foo, Bar, Baz, and int need to be resolved.
-    """
-    OB = '<'
-    tmpl_arg_count = t.get_num_template_arguments()
-
-    if tmpl_arg_count <= 0:
-        return [t.spelling]
-
-    ret = list()
-
-    for i in range(tmpl_arg_count):
-        ret += extract_type_strings(t.get_template_argument_type(i))
-
-    i = t.spelling.find(OB)
-    if i == -1:
-        ret.append(t.spelling)
-    else:
-        ret.append(t.spelling[:i])
-
-    return ret
-
-
-def full_type_string(t: clang.cindex.Type) -> str:
-    """
-    Get the full type string with expanded
-    C++ names.
-
-    @param t:
-    @return:
-    """
-    OB = '<'
-    CB = '>'
-    n = t.get_num_template_arguments()
-
-    if n <= 0:
-        return t.spelling
-
-    i = t.spelling.find(OB)
-
-    if i == -1:
-        base = t.spelling
-    else:
-        base = t.spelling[:i]
-
-    i = t.spelling.rfind(CB)
-
-    if i == -1:
-        ex = ''
-    else:
-        ex = t.spelling[i+1:]
-
-    args = list()
-
-    for i in range(n):
-        args.append(full_type_string(t.get_template_argument_type(i)))
-
-    if len(args):
-        return "%s[%s]%s" % (base, ','.join(args), ex)
-
-    return base
-
-
 def convert_dialect(s: str, bool_replace: bool = False) -> str:
     """
     Converts C++ dialect string to Cython dialect
@@ -362,3 +431,61 @@ def convert_dialect(s: str, bool_replace: bool = False) -> str:
         ret = ret.replace("bool", "bint")
 
     return ret
+
+
+# def sanitize_type_string(s: str) -> str:
+#     """
+#     Prepares a type string for submission to resolver.
+#     Removes extraneous adjectives from C builtin types
+#     like signedness and remove generic information.
+#
+#     @param s: Input type string.
+#     @return: Sanitized type string.
+#     """
+#     s = s.replace("unsigned ", '')\
+#          .replace("signed ", '')\
+#          .replace("const ", '')\
+#          .replace("volatile ", '')\
+#          .replace("restrict ", '')\
+#          .replace('*', '')\
+#          .replace('&', '')\
+#          .replace("typename ", '')
+#
+#     s = strip_beg_type_ids(s)
+#
+#     try:
+#         s = s[:s.index('[')]
+#     except ValueError:
+#         pass
+#
+#     return s.strip()
+
+
+# def flatten_pointers(t: clang.cindex.Type) -> List[clang.cindex.Type]:
+#     """
+#     Extract types from arbitrary pointer or function pointer types.
+#
+#     Examples:
+#     Case: std::string (*foo)(long, std::vector<int>)
+#     Result: [std::string, long, std::vector<int>]
+#     Remarks: Note this function fails to process the int in std::vector.
+#     This should be processed prior.
+#
+#     @param t: The type to process.
+#     @return: List of types within t hidden behind pointers.
+#     """
+#     result = list()
+#
+#     if is_function_pointer(t):
+#         extracted = (
+#             get_function_pointer_return_type(t),
+#             *get_function_pointer_arg_types(t)
+#         )
+#         for param in extracted:
+#             result += flatten_pointers(param)
+#     else:
+#         if t.kind == clang.cindex.TypeKind.POINTER:
+#             t = follow_pointer(t)
+#         result.append(t)
+#
+#     return result

@@ -23,10 +23,10 @@ with open("./README.md", 'r') as file:
 
 setup(
     name="pxdgen",
-    version="1.0.1",
+    version="1.1.0",
     url="https://github.com/earowley/pxdgen",
     py_modules=["_pxdgen"],
-    packages=["pxdgen", "pxdgen.clang", "pxdgen.utils"],
+    packages=["pxdgen", "pxdgen.utils"],
     package_dir={
         "": "scripts",
         "pxdgen": "src/pxdgen"
@@ -37,10 +37,11 @@ setup(
     license="GNU GPLv3",
     author="Eric Rowley",
     author_email="earowley23@gmail.com",
-    description="A tool for converting one or more C/C++ headers to Cython header files.",
+    description="A tool for converting one or more C/C++ headers to Cython pxd files.",
     long_description=long_d,
     long_description_content_type="text/markdown",
     install_requires=[
+        "setuptools",
         "libclang",
         "colorama"
     ],

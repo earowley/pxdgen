@@ -15,7 +15,7 @@
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import colorama
-import clang.cindex
+
 
 _WARNING_LEVEL = 0
 
@@ -44,25 +44,3 @@ def warn(message: str, warning_level: int = 1):
     """
     if warning_level <= _WARNING_LEVEL:
         print(colorama.Fore.YELLOW + "[Warning] " + colorama.Fore.RESET + message)
-
-
-def warn_unsupported(parent: clang.cindex.Cursor, unsupported_type: clang.cindex.CursorKind):
-    """
-    Warns of an unsupported Clang type in PxdGen.
-    Defaults to warning level 2.
-
-    @param parent: Parent cursor for identification/location purposes.
-    @param unsupported_type: The type that is unsupported.
-    @return: None
-    """
-    try:
-        file_loc = parent.location.file.name
-    except AttributeError:
-        file_loc = "undefined"
-
-    warn("Unsupported type '%s' found in %s %s, file %s" % (
-        unsupported_type.name,
-        parent.kind.name,
-        parent.spelling,
-        file_loc
-    ), warning_level=2)

@@ -19,21 +19,11 @@ import sys
 import os
 import os.path
 import glob
-
 import clang.cindex
-
-import pxdgen.utils
-import pxdgen.utils.warning as warnings
-from pxdgen.config import set_config, Setting
-from pxdgen.utils import TypeResolver
+import pxdgen.utils as utils
 from pxdgen.utils import TabWriter
-from pxdgen.clang.namespaces import Namespace
-
-
-FLAG_NOIMPORT = "noimport"
-FLAG_AUTODEFINE = "autodefine"
-FLAG_FORWARD_DECL = "emitfwdecl"
-FLAG_AUTOIMPORT = "autoimport"
+import pxdgen.utils.warning as warnings
+from pxdgen.cursors import Namespace
 
 
 class PXDGen:
@@ -43,17 +33,24 @@ class PXDGen:
 
         @param program_options: Options supplied to CLI.
         """
-        if not program_options.directory and not os.path.isfile(program_options.header):
-            exit("Unable to find input file '%s'" % program_options.header)
+        dir_mode = os.path.isdir(program_options.header)
+        file_mode = os.path.isfile(program_options.header)
+        relpath = program_options.relpath or os.getcwd()
 
-        if program_options.directory:
-            if not program_options.output:
-                exit("To use directory output mode, specify a directory output name with '-o'")
-            if not os.path.isdir(program_options.header):
-                exit("Unable to find input directory '%s'" % program_options.header)
+        if not dir_mode and not file_mode:
+            exit(f"Unable to find input '{program_options.header}' on the file system")
 
-            if not os.path.isdir(program_options.output):
-                os.mkdir(program_options.output)
+        if not os.path.isdir(relpath):
+            exit(f"Unable to find working directory {relpath}")
+
+        if dir_mode and not program_options.output:
+            request = input("Detected directory without an output location, are you sure you want to print the results to stdout? [y/n]")
+
+            if request.lower() != 'y':
+                exit("Use the `-o` flag to specify an output directory")
+
+        if not os.path.isdir(program_options.output):
+            os.mkdir(program_options.output)
 
         if program_options.libs:
             clang.cindex.Config.set_library_path(program_options.libs)
@@ -61,7 +58,7 @@ class PXDGen:
         try:
             self.index = clang.cindex.Index.create()
         except Exception as e:
-            exit("Clang error: %s" % e)
+            exit(f"Error with libclang: {e}")
 
         clang_args = list()
 
@@ -75,10 +72,10 @@ class PXDGen:
 
         self.clang_args = clang_args
         self.opts = program_options
+        self.dir_mode = dir_mode
+        self.file_mode = file_mode
+        self.relpath = relpath
         self.flags = set(program_options.flags)
-        
-        if FLAG_FORWARD_DECL in self.flags:
-            set_config(Setting.FORWARD_DECL)
 
         warnings.set_warning_level(program_options.warning_level)
 
@@ -88,120 +85,76 @@ class PXDGen:
 
         @return: None.
         """
-        if self.opts.directory:
-            self._run_directory()
-        else:
-            self._run_standard()
+        to_parse = list()
 
-    def _run_standard(self):
-        stream = sys.stdout if not self.opts.output else open(self.opts.output, 'w')
-        abs_header = os.path.abspath(self.opts.header)
-        valid_headers = {abs_header}
-        tu = self.index.parse(self.opts.header, self.clang_args)
-        resolver = TypeResolver(False)
-        vld_ns = None
+        if self.file_mode:
+            to_parse.append(os.path.abspath(self.opts.header))
+        elif self.dir_mode:
+            for header in ("**/*.h", "**/*.hpp"):
+                for gt in glob.glob(os.path.join(self.opts.header, header), recursive=True):
+                    to_parse.append(os.path.abspath(gt))
 
-        if self.opts.recursive:
-            if self.opts.headers:
-                for glb in self.opts.headers:
-                    valid_headers |= set([os.path.abspath(g) for g in glob.glob(glb)])
+        valid_headers = set(to_parse)
+
+        for gt in self.opts.headers:
+            for file in glob.glob(gt):
+                valid_headers.add(os.path.abspath(file))
+
+        ctx = dict()
+
+        for file in to_parse:
+            tu = self.index.parse(file, self.clang_args)
+            namespaces = utils.find_namespaces(tu.cursor, valid_headers)
+
+            for space_name, cursors in namespaces.items():
+                imports, fwd, body = ctx.get(space_name, (set(), TabWriter(), TabWriter()))
+                pxspace = Namespace(cursors, self.opts.recursive, valid_headers)
+
+                for i in pxspace.import_strings:
+                    imports.add(i)
+
+                if not fwd.tell():
+                    fwd.writeline("cdef extern from *:")
+                    fwd.indent()
+
+                for decl in pxspace.forward_decls:
+                    fwd.writeline(decl.cython_header(False))
+                    fwd.indent()
+                    fwd.writeline("pass\n")
+                    fwd.unindent()
+
+                body.writeline(pxspace.cython_header(os.path.relpath(file, self.opts.relpath)))
+                body.indent()
+
+                for line in pxspace.members():
+                    body.writeline(line)
+
+                body.unindent()
+                body.writeline('')
+                ctx[space_name] = (imports, fwd, body)
+
+        for space_name in ctx:
+            imports, fwd, body = ctx[space_name]
+
+            if self.opts.output:
+                out_path = os.path.join(self.opts.output, space_name.replace("::", os.path.sep))
+
+                if not os.path.isdir(out_path):
+                    os.makedirs(out_path)
+
+                stream = open(os.path.join(out_path, "__init__.pxd"), 'w')
             else:
-                valid_headers = None
-            if self.opts.namespaces:
-                vld_ns = self.opts.namespaces
+                stream = sys.stdout
 
-        namespaces = pxdgen.utils.find_namespaces(tu.cursor, valid_headers, vld_ns, abs_header)
-        namespaces[''] = [tu.cursor]
+            for i in imports:
+                stream.write(i)
+                stream.write('\n')
 
-        for key, value in namespaces.items():
-            ns = Namespace(value, key != '' or (self.opts.recursive and not self.opts.headers), key, os.path.relpath(self.opts.header), valid_headers)
-            ns.process_types(resolver)
-            namespaces[key] = ns
-
-        self._process_namespaces(namespaces, resolver, stream)
-        resolver.warn_unknown_types()
-        stream.close()
-
-    def _run_directory(self):
-        resolver, spaces = self._preprocess_directory(self.opts.header)
-
-        for cpp_space in spaces:
-            with open(os.path.join(self.opts.output, cpp_space.replace("::", '.') + ".pxd"), 'w') as out:
-                self._process_namespaces(spaces[cpp_space], resolver, out)
-        resolver.warn_unknown_types()
-
-    def _process_namespaces(self, namespaces: dict, resolver: TypeResolver, stream):
-        writer = TabWriter()
-
-        for namespace in namespaces.values():
-            if namespace.has_declarations:
-                writer.writeline(namespace.cython_namespace_header)
-                writer.indent()
-
-                for line in namespace.generate_declarations(resolver):
-                    writer.writeline(line)
-
-                writer.unindent()
-                writer.writeline('\n')
-
-        if resolver.imports and FLAG_NOIMPORT not in self.flags:
-            stream.write("#  PXDGEN IMPORTS\n")
-            stream.write('\n'.join(resolver.drain_imports()))
-            stream.write('\n\n')
-        if resolver.unknown_imports:
-            if FLAG_AUTODEFINE in self.flags:
-                stream.write("#  PXDGEN AUTO-DEFINED TYPES\n")
-                stream.write("cdef extern from *:\n")
-                for pt in resolver.drain_unknown_imports():
-                    stream.write("    ctypedef struct %s:\n        pass\n" % pt.basename)
-                stream.write("\n\n")
-            elif FLAG_AUTOIMPORT in self.flags:
-                stream.write("#  PXDGEN AUTO-IMPORTS\n")
-                for pt in resolver.drain_unknown_imports():
-                    stream.write(pt.import_string)
-                    stream.write('\n')
-                stream.write("\n\n")
-
-        stream.write(writer.getvalue())
-
-    def _preprocess_directory(self, dirname: str) -> tuple:
-        resolver = TypeResolver(True)
-        all_spaces = dict()
-
-        def _r(s):
-            for handle in os.scandir(s):
-                if handle.is_dir():
-                    _r(handle.path)
-                else:
-                    if not handle.name.endswith(".h") and not handle.name.endswith(".hpp"):
-                        continue
-                    print(f"Pre-processing {handle.path}...")
-                    main_header = os.path.abspath(handle.path)
-                    tu = self.index.parse(handle.path, self.clang_args)
-                    namespaces = pxdgen.utils.find_namespaces(tu.cursor, {main_header})
-                    namespaces[''] = [tu.cursor]
-                    for key, value in namespaces.items():
-                        if key in all_spaces:
-                            all_spaces[key][handle.path] = value
-                        else:
-                            all_spaces[key] = {handle.path:  value}
-        _r(dirname)
-
-        for cppath in all_spaces:
-            print(f"Generating type info for namespace {cppath}")
-            for header in all_spaces[cppath]:
-                # (cursors, recursive, cpp_path, header_name, valid headers)
-                ns = Namespace(
-                    all_spaces[cppath][header],
-                    False,
-                    cppath,
-                    os.path.relpath(header),
-                    {os.path.abspath(header)}
-                )
-                all_spaces[cppath][header] = ns
-                ns.process_types(resolver)
-
-        return resolver, all_spaces
+            stream.write('\n')
+            stream.write(fwd.getvalue())
+            stream.write('\n')
+            stream.write(body.getvalue())
+            stream.write('\n')
 
 
 def main():
@@ -212,34 +165,28 @@ def main():
     """
     args = sys.argv[1:]
 
-    argp = argparse.ArgumentParser(description="Converts a C/C++ header file to a pxd file")
+    argp = argparse.ArgumentParser(description="A tool that converts C/C++ headers to pxd files")
     argp.add_argument("header",
-                        help="Path to C/C++ header or directory (if using -D) to parse")
+                      help="Path to C/C++ header file or project directory to parse")
     argp.add_argument("-o", "--output",
-                        help="Path to output file or directory (defaults to stdout)")
-    argp.add_argument("-r", "--recursive-includes",
-                        action="store_true",
-                        help="Include declarations from headers #included by the preprocessor",
-                        dest="recursive")
-    argp.add_argument("-x", "--language",
-                      help="Force Clang to use the specified language for interpretation")
-    argp.add_argument("-I", "--include",
-                        action="append",
-                        help="Add a directory to Clang's include path")
-    argp.add_argument("-L", "--libclang-path",
-                      dest="libs",
-                      help="Specify the path to a directory containing libclang and its dependencies")
-    argp.add_argument("-D", "--directory",
+                      help="Path to output file or directory (defaults to stdout)")
+    argp.add_argument("-p", "--relpath",
+                      help="Relative path to parse from (defaults to pwd)")
+    argp.add_argument("-r", "--recursive",
                       action="store_true",
-                      help="Use pxdgen to parse a directory tree and set namespace output mode")
+                      help="Include declarations from all nested headers")
     argp.add_argument("-H", "--headers",
                       action="append",
                       default=[],
-                      help="Whitelist specified headers with a glob term (for filtering -r)")
-    argp.add_argument("-N", "--namespaces",
+                      help="A glob term of headers to include from")
+    argp.add_argument("-x", "--language",
+                      help="Force Clang to use the specified language for interpretation")
+    argp.add_argument("-I", "--include",
                       action="append",
-                      default=[],
-                      help="Whitelist specified namespaces with an fnmatch term (for filtering -r)")
+                      help="Add a directory to Clang's include path")
+    argp.add_argument("-L", "--libclang-path",
+                      dest="libs",
+                      help="Specify the path to a directory containing libclang and its dependencies")
     argp.add_argument("-W", "--warning-level",
                       type=int,
                       default=1,
