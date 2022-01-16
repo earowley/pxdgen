@@ -13,6 +13,7 @@
 
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 from __future__ import annotations
 
 import os
@@ -148,18 +149,6 @@ class CCursor:
 
         return result
 
-    # @property
-    # def imports(self) -> Set[CCursor]:
-    #     """
-    #     Fully resolved import strings needed for this within this cursor.
-    #
-    #     @return: Set of import strings.
-    #     """
-    #     current_space = self.soft_namespace
-    #     assoc = self.associated_types
-    #
-    #     return {t for t in assoc if t.namespace != current_space}
-
 
 class DataType(CCursor):
     def __init__(self, cursor: clang.cindex.Cursor, *_):
@@ -198,7 +187,11 @@ class DataType(CCursor):
         # This block extracts the array size portion,
         # and is saved to suffix so that the end
         # result looks like int data[20]
+
         typename = utils.full_type_repr(self.cursor.type, self.cursor)
+
+        if self.cursor.type.get_declaration().is_anonymous() and not typename:
+            typename = f"char[{self.cursor.type.get_size()}]"
 
         suffix = ''
         ob = typename.find('[')
@@ -206,11 +199,6 @@ class DataType(CCursor):
         if ob != -1:
             suffix = typename[ob:]
             typename = typename[:ob].strip()
-
-        # if typename.endswith('*'):
-        #     typename = typename.replace(" *", '*')
-        # elif typename.endswith('&'):
-        #     typename = typename.replace(" &", '&')
 
         ret = f"{typename} {self.name}{suffix}"
 
@@ -255,11 +243,6 @@ class Function(CCursor):
         restype = utils.full_type_repr(self.cursor.result_type, self.cursor)
         restype = utils.convert_dialect(restype, True).strip()
 
-        # if restype.endswith('*'):
-        #     restype = restype.replace(" *", '*')
-        # elif restype.endswith('&'):
-        #     restype = restype.replace(" &", '&')
-
         return f"{restype} {self.name}{self._tmpl_params}({', '.join(self._argument_declarations)})"
 
     @property
@@ -272,11 +255,11 @@ class Function(CCursor):
         return self.cursor.is_static_method()
 
     @property
-    def associated_types(self) -> List[CCursor]:
-        result = [a for a in super().associated_types]
+    def associated_types(self) -> Set[CCursor]:
+        result = super().associated_types
 
         for arg in self._args:
-            result += arg.associated_types
+            result.update(arg.associated_types)
 
         return result
 
@@ -430,12 +413,35 @@ class Typedef(CCursor):
     @property
     def associated_types(self) -> Set[CCursor]:
         result = set()
-        cursor = self.cursor.underlying_typedef_type.get_declaration()
+        # cursor = self.cursor.underlying_typedef_type.get_declaration()
+        cursor = self.underlying_type.get_declaration()
 
         if cursor.kind != clang.cindex.CursorKind.NO_DECL_FOUND:
-            result.update(specialize(cursor).associated_types)
+            cc = specialize(cursor)
+            result.add(cc)
 
         return result
+
+    @property
+    def underlying_type(self) -> clang.cindex.Type:
+        """
+        Unwraps the underlying type from pointers, arrays, etc.
+
+        @return: The underlying type. A better form of underlying_typedef_type
+        @rtype: The type underlying this typedef
+        """
+        ctype = self.cursor.underlying_typedef_type
+
+        if ctype.kind == clang.cindex.TypeKind.POINTER:
+            while ctype.kind == clang.cindex.TypeKind.POINTER:
+                ctype = ctype.get_pointee()
+        elif ctype.kind in (clang.cindex.TypeKind.LVALUEREFERENCE, clang.cindex.TypeKind.RVALUEREFERENCE):
+            ctype = ctype.get_pointee()
+        elif ctype.kind == clang.cindex.TypeKind.CONSTANTARRAY:
+            while ctype.kind == clang.cindex.TypeKind.CONSTANTARRAY:
+                ctype = ctype.get_array_element_type()
+
+        return ctype
 
     @property
     def declaration(self) -> str:
@@ -456,12 +462,8 @@ class Typedef(CCursor):
 
             return f"ctypedef {left} ({'*' * ndim}{self.name})({right.replace('(void)', '()')})"
 
-        spelling = utils.convert_dialect(utils.full_type_repr(utt, self.cursor))
-
-        # if spelling.endswith('*'):
-        #     spelling = spelling.replace(" *", '*')
-        # elif spelling.endswith('&'):
-        #     spelling = spelling.replace(" &", '&')
+        # spelling can be empty if typedef names an anonymous structure
+        spelling = utils.convert_dialect(utils.full_type_repr(utt, self.cursor)) or f"char[{utt.get_size()}]"
 
         return f"ctypedef {spelling} {self.name}"
 
@@ -485,22 +487,12 @@ class Struct(CCursor):
         clang.cindex.CursorKind.CXX_METHOD,
         clang.cindex.CursorKind.FUNCTION_TEMPLATE,
         clang.cindex.CursorKind.TYPEDEF_DECL,
+        clang.cindex.CursorKind.ENUM_DECL,
+        clang.cindex.CursorKind.CLASS_DECL,
+        clang.cindex.CursorKind.STRUCT_DECL,
+        clang.cindex.CursorKind.CLASS_TEMPLATE,
+        clang.cindex.CursorKind.UNION_DECL
     )
-
-    # Just for checking valid types
-    # Includes instance types as well as static types
-    # VALID_KINDS = (
-    #     INSTANCE_TYPES + (
-    #          clang.cindex.CursorKind.TEMPLATE_TYPE_PARAMETER,
-    #          clang.cindex.CursorKind.TEMPLATE_NON_TYPE_PARAMETER,
-    #          clang.cindex.CursorKind.STRUCT_DECL,
-    #          clang.cindex.CursorKind.ENUM_DECL,
-    #          clang.cindex.CursorKind.VAR_DECL,
-    #          clang.cindex.CursorKind.CLASS_DECL,
-    #          clang.cindex.CursorKind.CLASS_TEMPLATE,
-    #          clang.cindex.CursorKind.UNION_DECL,
-    #     )
-    # )
 
     def __init__(self, cursor: clang.cindex.Cursor, *_, name: str = ''):
         """
@@ -573,10 +565,30 @@ class Struct(CCursor):
 
         @return: Generator[str].
         """
+        anon = list()
+
         for child in self._children:
             if isinstance(child, Function) and child.is_static:
                 #  Handle static methods on instance side
                 yield "@staticmethod"
+            if hasattr(child, "cython_header"):
+                if not child.name:
+                    anon.append(child.cursor)
+                    continue
+
+                yield child.cython_header(False)
+
+                for line in child.members():
+                    yield TAB + line
+                continue
+            elif isinstance(child, Typedef):
+                if child.cursor in anon:
+                    for line in Namespace._gen_struct_enum(child.cursor, specialize(child.cursor).__class__, True, name=child.name):
+                        yield line
+
+                    anon.remove(child.cursor)
+                    continue
+
             yield child.declaration
 
         if not len(self._children):
@@ -584,37 +596,6 @@ class Struct(CCursor):
 
 
 class Namespace:
-    # Used to determine which types are output/processed as functions.
-    # Functions have their return type and argument types resolved
-    # FUNCTION_TYPES = (
-    #     clang.cindex.CursorKind.FUNCTION_DECL, clang.cindex.CursorKind.FUNCTION_TEMPLATE
-    # )
-
-    # Determines what gets yielded as a struct or cppclass within this namespace
-    # C++ classes also resolve to namespaces, but they are resolved in utils.find_namespaces
-    # CLASS_TYPES = (clang.cindex.CursorKind.STRUCT_DECL, clang.cindex.CursorKind.CLASS_DECL,
-    #                clang.cindex.CursorKind.CLASS_TEMPLATE
-    # )
-
-    # C++ classes are also processed as namespaces.
-    # These are cursors that will be encountered while processing,
-    # but should not emit warnings as they will not be ignored
-    # when the struct/cppclass is being emitted.
-    # STATIC_IGNORED_TYPES = (
-    #     clang.cindex.CursorKind.NAMESPACE, clang.cindex.CursorKind.CXX_METHOD,
-    #     clang.cindex.CursorKind.FIELD_DECL, clang.cindex.CursorKind.CONSTRUCTOR,
-    #     clang.cindex.CursorKind.TEMPLATE_TYPE_PARAMETER,
-    #     clang.cindex.CursorKind.TEMPLATE_NON_TYPE_PARAMETER,
-    #     clang.cindex.CursorKind.TEMPLATE_TEMPLATE_PARAMETER
-    # )
-
-    # All valid types. Convenient for fast warning determination
-    # VALID_TYPES = (clang.cindex.CursorKind.ENUM_DECL,
-    #                clang.cindex.CursorKind.TYPEDEF_DECL,
-    #                clang.cindex.CursorKind.VAR_DECL,
-    #                clang.cindex.CursorKind.UNION_DECL
-    # ) + FUNCTION_TYPES + CLASS_TYPES + STATIC_IGNORED_TYPES
-
     def __init__(self, cursors: list, recursive: bool, valid_headers: set, *_):
         """
         Represents a Cython namespace declaration, given the following parameters.
@@ -625,7 +606,7 @@ class Namespace:
                               useful for trimming if recursive is True.
         """
         self.cursors = [CCursor(c) for c in cursors]
-        self.cpp_name = self.cursors[0].address
+        self.cpp_name = self.cursors[0].address if cursors[0].kind in SPACE_KINDS else ''
         self.recursive = recursive
         self.valid_headers = valid_headers
         self.children = list()
@@ -652,20 +633,24 @@ class Namespace:
         """
         result = set()
 
-        for child in self.children:
-            assoc = specialize(child).associated_types
+        if self.recursive:
+            return result
 
-            # print(f"Associated types of {child.spelling}:")
-            for t in assoc:
+        for child in self.children:
+            assoc = set()
+
+            for t in specialize(child).associated_types:
+                # Handle if import should be done via libc
+                stdpath = STD_IMPORTS.get(t.address, None)
+
+                if stdpath is not None and t.file not in self.valid_headers:
+                    result.add(f"from {stdpath} cimport {t.name} as {t.address.replace('::', '_')}")
+                    continue
+
                 res = utils.get_import_string(child, t.cursor)
 
                 if res is not None:
-                    # Handle if import should be done via libc
-                    stdpath = STD_IMPORTS.get(t.address, None)
-                    if stdpath is not None and t.file not in self.valid_headers:
-                        result.add(f"from {stdpath} cimport {t.name} as {t.address.replace('::', '_')}")
-                    else:
-                        result.add(res)
+                    result.add(res)
 
         return result
 
@@ -680,17 +665,17 @@ class Namespace:
         """
         result = set()
 
-        for child in self.children:
-            cc = specialize(child)
-            assoc = cc.associated_types
+        if self.recursive:
+            return result
 
-            for t in assoc:
+        for child in self.children:
+            for t in specialize(child).associated_types:
                 if (
                         t.file not in self.valid_headers and
                         t.address not in IGNORED_IMPORTS and
                         t.address not in STD_IMPORTS
                 ):
-                    result.add(specialize(t.cursor))
+                    result.update(Namespace._recurse_assoc(specialize(t.cursor)))
 
         return result
 
@@ -766,6 +751,8 @@ class Namespace:
             return False
         if self.class_space and child.kind in Struct.INSTANCE_TYPES:
             return False
+        if type(specialize(child)) is CCursor:
+            return False
         try:
             return (
                 self.recursive or
@@ -789,3 +776,12 @@ class Namespace:
 
         for m in obj.members():
             yield TAB + m
+
+    @staticmethod
+    def _recurse_assoc(child: CCursor) -> Set[CCursor]:
+        result = {child}
+
+        for assoc in child.associated_types:
+            result.update(Namespace._recurse_assoc(specialize(assoc.cursor)))
+
+        return result

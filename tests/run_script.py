@@ -5,7 +5,7 @@ sys.path.append("../src")
 from _pxdgen import PXDGen
 
 
-TEST = "/usr/include/stdio.h"
+TEST = "./cplusplus.hpp"
 
 
 class Dummy:
@@ -15,12 +15,14 @@ class Dummy:
 if __name__ == "__main__":
     opts = Dummy()
     opts.header = TEST
-    opts.output = ''
+    opts.output = './output'
     opts.relpath = os.path.dirname(TEST)
     opts.recursive = False
     opts.headers = list()
     opts.language = ''
-    opts.include = list()
+    opts.include = ["/usr/lib/clang/13.0.0/include"]
     opts.libs = ''
-    opts.warning_level = 0
-    opts.flags = list()
+    opts.verbose = True
+    opts.flags = []
+
+    PXDGen(opts).run()

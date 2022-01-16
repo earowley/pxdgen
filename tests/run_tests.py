@@ -73,7 +73,7 @@ from pxdgen.cursors import *
 
 def test_cplusplus():
     ind = cc.Index.create()
-    tu = ind.parse("./cplusplus.hpp")
+    tu = ind.parse("./cplusplus.hpp", ['-I', '/usr/lib/clang/13.0.0/include'])
     cur = tu.cursor
 
     for child in cur.get_children():

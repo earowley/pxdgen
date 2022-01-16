@@ -22,8 +22,10 @@ import glob
 import clang.cindex
 import pxdgen.utils as utils
 from pxdgen.utils import TabWriter
-import pxdgen.utils.warning as warnings
-from pxdgen.cursors import Namespace
+from pxdgen.cursors import Namespace, Typedef, specialize
+
+
+FLAG_EXTRA_DECLS = "includerefs"
 
 
 class PXDGen:
@@ -49,7 +51,7 @@ class PXDGen:
             if request.lower() != 'y':
                 exit("Use the `-o` flag to specify an output directory")
 
-        if not os.path.isdir(program_options.output):
+        if program_options.output and not os.path.isdir(program_options.output):
             os.mkdir(program_options.output)
 
         if program_options.libs:
@@ -57,8 +59,13 @@ class PXDGen:
 
         try:
             self.index = clang.cindex.Index.create()
-        except Exception as e:
-            exit(f"Error with libclang: {e}")
+        except clang.cindex.LibclangError as e:
+            msg = str(e)
+
+            if "set_library_path" in msg:
+                exit("Unable to find libclang.so. Specify the path to pxdgen with -L")
+
+            exit(msg)
 
         clang_args = list()
 
@@ -77,8 +84,6 @@ class PXDGen:
         self.relpath = relpath
         self.flags = set(program_options.flags)
 
-        warnings.set_warning_level(program_options.warning_level)
-
     def run(self):
         """
         Run the program with parameters supplied in constructor.
@@ -96,6 +101,13 @@ class PXDGen:
 
         valid_headers = set(to_parse)
 
+        if self.opts.verbose:
+            print(f"PxDGen in {'file mode' if self.file_mode else 'directory mode'} parsing the following header{'s' if len(valid_headers) > 1 else ''}:")
+
+            for h in valid_headers:
+                print(h)
+            print()
+
         for gt in self.opts.headers:
             for file in glob.glob(gt):
                 valid_headers.add(os.path.abspath(file))
@@ -104,24 +116,60 @@ class PXDGen:
 
         for file in to_parse:
             tu = self.index.parse(file, self.clang_args)
+
+            if self.opts.verbose:
+                print("Parsing", file)
+
+                for d in tu.diagnostics:
+                    print(d)
+                print()
+
             namespaces = utils.find_namespaces(tu.cursor, valid_headers)
+            namespaces[''] = [tu.cursor]
+            anon = list()
 
             for space_name, cursors in namespaces.items():
-                imports, fwd, body = ctx.get(space_name, (set(), TabWriter(), TabWriter()))
                 pxspace = Namespace(cursors, self.opts.recursive, valid_headers)
+
+                if not pxspace.has_declarations:
+                    continue
+
+                imports, fwd, body = ctx.get(space_name, (set(), TabWriter(), TabWriter()))
 
                 for i in pxspace.import_strings:
                     imports.add(i)
 
-                if not fwd.tell():
-                    fwd.writeline("cdef extern from *:")
-                    fwd.indent()
+                if FLAG_EXTRA_DECLS in self.flags:
+                    fwd_decls = sorted(pxspace.forward_decls, key=lambda v: len(Namespace._recurse_assoc(v)))
 
-                for decl in pxspace.forward_decls:
-                    fwd.writeline(decl.cython_header(False))
-                    fwd.indent()
-                    fwd.writeline("pass\n")
-                    fwd.unindent()
+                    if not fwd.tell() and len(fwd_decls):
+                        fwd.writeline("cdef extern from *:")
+                        fwd.indent()
+
+                    # This way because not certain of declaration order in fwd_decls
+                    for decl in fwd_decls:
+                        if not decl.name:
+                            anon.append(decl.cursor)
+
+                    for decl in anon:
+                        fwd_decls.remove(specialize(decl))
+
+                    for decl in fwd_decls:
+                        if hasattr(decl, "cython_header"):
+                            fwd.writeline(decl.cython_header(False))
+                            fwd.indent()
+                            for mem in decl.members():
+                                fwd.writeline(mem)
+                            fwd.unindent()
+                        elif isinstance(decl, Typedef):
+                            utt = decl.underlying_type.get_declaration()
+                            if utt in anon:
+                                for line in Namespace._gen_struct_enum(utt, specialize(utt).__class__, True, name=decl.name):
+                                    fwd.writeline(line)
+                            else:
+                                fwd.writeline(decl.declaration)
+                        else:
+                            fwd.writeline(decl.declaration)
 
                 body.writeline(pxspace.cython_header(os.path.relpath(file, self.opts.relpath)))
                 body.indent()
@@ -142,7 +190,8 @@ class PXDGen:
                 if not os.path.isdir(out_path):
                     os.makedirs(out_path)
 
-                stream = open(os.path.join(out_path, "__init__.pxd"), 'w')
+                out_file = "__init__.pxd" if space_name else f"{self.opts.output}.pxd"
+                stream = open(os.path.join(out_path, out_file), 'w')
             else:
                 stream = sys.stdout
 
@@ -151,8 +200,11 @@ class PXDGen:
                 stream.write('\n')
 
             stream.write('\n')
-            stream.write(fwd.getvalue())
-            stream.write('\n')
+
+            if FLAG_EXTRA_DECLS in self.flags:
+                stream.write(fwd.getvalue())
+                stream.write('\n')
+
             stream.write(body.getvalue())
             stream.write('\n')
 
@@ -187,10 +239,9 @@ def main():
     argp.add_argument("-L", "--libclang-path",
                       dest="libs",
                       help="Specify the path to a directory containing libclang and its dependencies")
-    argp.add_argument("-W", "--warning-level",
-                      type=int,
-                      default=1,
-                      help="Set the warning level of the current process")
+    argp.add_argument("-v", "--verbose",
+                      action="store_true",
+                      help="Print the status of the application to stdout")
     argp.add_argument("-f", "--flag",
                       action="append",
                       dest="flags",

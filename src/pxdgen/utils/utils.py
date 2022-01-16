@@ -327,6 +327,8 @@ def full_type_repr(ctype: clang.cindex.Type, ref_cursor: clang.cindex.Cursor) ->
         return full_type_repr(ctype.get_pointee(), ref_cursor) + '&'
     elif ctype.kind == clang.cindex.TypeKind.RVALUEREFERENCE:
         return full_type_repr(ctype.get_pointee(), ref_cursor) + "&&"
+    elif ctype.kind == clang.cindex.TypeKind.CONSTANTARRAY:
+        return full_type_repr(ctype.get_array_element_type(), ref_cursor) + f"[{ctype.get_array_size()}]"
 
     nargs = ctype.get_num_template_arguments()
 
