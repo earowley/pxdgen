@@ -279,10 +279,9 @@ def get_import_string(importer: clang.cindex.Cursor, importee: clang.cindex.Curs
     importer_home = containing_space(importer, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE)
     importee_home = containing_space(importee, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE)
     importee_space = containing_space(importee, lambda p: p.kind in SPACE_KINDS)
+    addr = f"{importee_space}::{importee.spelling}".strip("::")
 
-    if importer_home == importee_home or f"{importee_space}::{importee.spelling}".strip("::") in IGNORED_IMPORTS:
-        return None
-    if not importee_space:
+    if importer_home == importee_home or addr in IGNORED_IMPORTS or not importee_space:
         return None
 
     importee_dot = containing_space(importee, lambda p: p.kind != clang.cindex.CursorKind.NAMESPACE).split("::")[1:]

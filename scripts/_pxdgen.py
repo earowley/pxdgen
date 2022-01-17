@@ -129,7 +129,7 @@ class PXDGen:
             anon = list()
 
             for space_name, cursors in namespaces.items():
-                pxspace = Namespace(cursors, self.opts.recursive, valid_headers)
+                pxspace = Namespace(cursors, self.opts.recursive, file, valid_headers)
 
                 if not pxspace.has_declarations:
                     continue

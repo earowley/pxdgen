@@ -16,7 +16,7 @@ if __name__ == "__main__":
     opts = Dummy()
     opts.header = TEST
     opts.output = './output'
-    opts.relpath = os.path.dirname(TEST)
+    opts.relpath = ""
     opts.recursive = False
     opts.headers = list()
     opts.language = ''

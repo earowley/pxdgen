@@ -270,6 +270,8 @@ class Function(CCursor):
         Yields the Cython argument declarations of this function.
         """
         for mem in self._args:
+            # `=*` syntax seems to only work for cdef functions defined in pyx files
+            # suffix = "=*" if any(child.kind == clang.cindex.CursorKind.UNEXPOSED_EXPR for child in mem) else ''
             yield mem.declaration
 
 
@@ -569,8 +571,8 @@ class Struct(CCursor):
         anon = list()
 
         for child in self._children:
+            #  Handle static methods on instance side
             if isinstance(child, Function) and child.is_static:
-                #  Handle static methods on instance side
                 yield "@staticmethod"
             if hasattr(child, "cython_header"):
                 if not child.name:
@@ -597,24 +599,26 @@ class Struct(CCursor):
 
 
 class Namespace:
-    def __init__(self, cursors: list, recursive: bool, valid_headers: set, *_):
+    def __init__(self, cursors: list, recursive: bool, main_header: str,  valid_headers: set, *_):
         """
         Represents a Cython namespace declaration, given the following parameters.
 
         @param cursors: A list of cursors associated with this namespace.
         @param recursive: Whether this namespace should declare children from other headers, recursively.
+        @param main_header: The header file to accept declarations from.
         @param valid_headers: A set of valid headers from which children can be declared.
                               useful for trimming if recursive is True.
         """
         self.cursors = [CCursor(c) for c in cursors]
         self.cpp_name = self.cursors[0].address if cursors[0].kind in SPACE_KINDS else ''
         self.recursive = recursive
+        self.main_header = main_header
         self.valid_headers = valid_headers
         self.children = list()
         self.class_space = all(utils.is_cppclass(c) for c in cursors)
 
         for cursor in self.cursors:
-            self.children += list(filter(self._child_filter, cursor))
+            self.children += filter(self._child_filter, cursor)
 
     @property
     def has_declarations(self) -> bool:
@@ -639,11 +643,13 @@ class Namespace:
 
         for child in self.children:
             for t in specialize(child).associated_types:
-                # Handle if import should be done via libc
-                stdpath = STD_IMPORTS.get(t.address, None)
+                if t.file not in self.valid_headers:
+                    # Handle if import should be done via libc
+                    stdpath = STD_IMPORTS.get(t.address, None)
 
-                if stdpath is not None and t.file not in self.valid_headers:
-                    result.add(f"from {stdpath} cimport {t.name} as {t.address.replace('::', '_')}")
+                    if stdpath is not None:
+                        result.add(f"from {stdpath} cimport {t.name} as {t.address.replace('::', '_')}")
+
                     continue
 
                 res = utils.get_import_string(child, t.cursor)
@@ -750,12 +756,15 @@ class Namespace:
             return False
         if self.class_space and child.kind in Struct.INSTANCE_TYPES:
             return False
-        if type(specialize(child)) is CCursor:
+        cc = specialize(child)
+        if type(cc) is CCursor:
+            return False
+        if isinstance(cc, Struct) and cc.is_forward_decl:
             return False
         try:
             return (
                 self.recursive or
-                os.path.abspath(child.location.file.name) in self.valid_headers
+                os.path.abspath(child.location.file.name) == self.main_header
             )
         except AttributeError:
             return False
