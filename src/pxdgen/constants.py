@@ -56,7 +56,8 @@ BASIC_DATA_KINDS = (
 )
 IGNORED_IMPORTS = {
     "size_t",
-    "std::size_t"
+    "std::size_t",
+    "ptrdiff_t"
 }
 STD_IMPORTS = {
     "int8_t": "libc.stdint",

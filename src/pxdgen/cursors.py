@@ -20,7 +20,7 @@ import os
 import clang.cindex
 from . import utils
 from .constants import *
-from typing import Optional, List, Generator, Set, Any, Tuple, Type
+from typing import Optional, Generator, Set, Any, Tuple, Type
 
 
 def specialize(cursor: clang.cindex.Cursor) -> Any:
@@ -240,6 +240,7 @@ class Function(CCursor):
 
         @return: str.
         """
+
         restype = utils.full_type_repr(self.cursor.result_type, self.cursor)
         restype = utils.convert_dialect(restype, True).strip()
 
@@ -637,8 +638,6 @@ class Namespace:
             return result
 
         for child in self.children:
-            assoc = set()
-
             for t in specialize(child).associated_types:
                 # Handle if import should be done via libc
                 stdpath = STD_IMPORTS.get(t.address, None)
@@ -669,13 +668,13 @@ class Namespace:
             return result
 
         for child in self.children:
-            for t in specialize(child).associated_types:
+            for t in Namespace._get_all_assoc(child):
                 if (
                         t.file not in self.valid_headers and
                         t.address not in IGNORED_IMPORTS and
                         t.address not in STD_IMPORTS
                 ):
-                    result.update(Namespace._recurse_assoc(specialize(t.cursor)))
+                    result.add(t)
 
         return result
 
@@ -783,5 +782,27 @@ class Namespace:
 
         for assoc in child.associated_types:
             result.update(Namespace._recurse_assoc(specialize(assoc.cursor)))
+
+        return result
+
+    @staticmethod
+    def _get_all_assoc(cursor: clang.cindex.Cursor) -> Set[CCursor]:
+        result = set()
+        stack = [cursor]
+
+        while len(stack):
+            current = stack.pop()
+
+            for child in current.get_children():
+                stack.append(child)
+
+                if child.kind in (
+                        clang.cindex.CursorKind.TYPE_REF,
+                        clang.cindex.CursorKind.TEMPLATE_REF
+                ):
+                    decl = child.get_definition()
+
+                    if decl is not None:
+                        result.add(specialize(decl))
 
         return result

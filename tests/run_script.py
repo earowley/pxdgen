@@ -20,7 +20,7 @@ if __name__ == "__main__":
     opts.recursive = False
     opts.headers = list()
     opts.language = ''
-    opts.include = ["/usr/lib/clang/13.0.0/include"]
+    opts.include = []
     opts.libs = ''
     opts.verbose = True
     opts.flags = []

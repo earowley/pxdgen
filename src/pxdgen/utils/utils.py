@@ -242,8 +242,13 @@ def get_relative_type_name(importer: clang.cindex.Cursor, importee: clang.cindex
     """
     importer_space = containing_space(importer, lambda p: p.kind in SPACE_KINDS)
     importee_space = containing_space(importee, lambda p: p.kind in SPACE_KINDS)
+    addr = f"{importee_space}::{importee.spelling}".strip("::")
 
-    if importer_space == importee_space or f"{importee_space}::{importee.spelling}".strip("::") in IGNORED_IMPORTS:
+    if importer_space == importee_space or addr in IGNORED_IMPORTS:
+        return importee.spelling
+    if addr in STD_IMPORTS:
+        return addr.replace("::", '_')
+    if not importee_space:
         return importee.spelling
 
     importer_home = containing_space(importer, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE)
@@ -276,6 +281,8 @@ def get_import_string(importer: clang.cindex.Cursor, importee: clang.cindex.Curs
     importee_space = containing_space(importee, lambda p: p.kind in SPACE_KINDS)
 
     if importer_home == importee_home or f"{importee_space}::{importee.spelling}".strip("::") in IGNORED_IMPORTS:
+        return None
+    if not importee_space:
         return None
 
     importee_dot = containing_space(importee, lambda p: p.kind != clang.cindex.CursorKind.NAMESPACE).split("::")[1:]
@@ -316,6 +323,28 @@ def full_type_repr(ctype: clang.cindex.Type, ref_cursor: clang.cindex.Cursor) ->
         decl = subtype.get_declaration()
 
         if decl.kind == clang.cindex.CursorKind.NO_DECL_FOUND:
+            if subtype.spelling.startswith("typename "):
+                parts = subtype.spelling[subtype.spelling.index(' ')+1:].split("::")
+                tmpl_removed = list()
+
+                for name in parts:
+                    j = name.find('<')
+
+                    if j != -1:
+                        tmpl_removed.append(name[:j])
+                    else:
+                        tmpl_removed.append(name)
+
+                cur = resolve_typename_type(subtype, tmpl_removed)
+
+                if cur is None:
+                    return subtype.spelling
+
+                j = tmpl_removed.index(cur.spelling)
+                corrected = get_relative_type_name(ref_cursor, cur)
+
+                return f"{parts[j].replace(cur.spelling, corrected)}.{'.'.join(parts[j+1:])}"
+
             return subtype.spelling
 
         return get_relative_type_name(ref_cursor, decl)
@@ -345,6 +374,29 @@ def full_type_repr(ctype: clang.cindex.Type, ref_cursor: clang.cindex.Cursor) ->
         params.append(full_type_repr(ctype.get_template_argument_type(i), ref_cursor))
 
     return f"{finalize(ctype)}<{', '.join(params)}>"
+
+
+def resolve_typename_type(ctype: clang.cindex.Type, parts: List[str]) -> Optional[clang.cindex.Cursor]:
+    cur = ctype.translation_unit.cursor.get_children()
+    stack = []
+    looking = 0
+
+    while True:
+        name = parts[looking]
+
+        for child in cur:
+            if child.spelling == name:
+                if child.kind in STRUCTURED_DATA_KINDS:
+                    return child
+                stack.append(cur)
+                cur = child.get_children()
+                looking += 1
+                break
+        else:
+            if not len(stack):
+                return None
+            looking -= 1
+            cur = stack.pop()
 
 
 def strip_type_ids(cursor: clang.cindex.Cursor) -> str:
@@ -433,61 +485,3 @@ def convert_dialect(s: str, bool_replace: bool = False) -> str:
         ret = ret.replace("bool", "bint")
 
     return ret
-
-
-# def sanitize_type_string(s: str) -> str:
-#     """
-#     Prepares a type string for submission to resolver.
-#     Removes extraneous adjectives from C builtin types
-#     like signedness and remove generic information.
-#
-#     @param s: Input type string.
-#     @return: Sanitized type string.
-#     """
-#     s = s.replace("unsigned ", '')\
-#          .replace("signed ", '')\
-#          .replace("const ", '')\
-#          .replace("volatile ", '')\
-#          .replace("restrict ", '')\
-#          .replace('*', '')\
-#          .replace('&', '')\
-#          .replace("typename ", '')
-#
-#     s = strip_beg_type_ids(s)
-#
-#     try:
-#         s = s[:s.index('[')]
-#     except ValueError:
-#         pass
-#
-#     return s.strip()
-
-
-# def flatten_pointers(t: clang.cindex.Type) -> List[clang.cindex.Type]:
-#     """
-#     Extract types from arbitrary pointer or function pointer types.
-#
-#     Examples:
-#     Case: std::string (*foo)(long, std::vector<int>)
-#     Result: [std::string, long, std::vector<int>]
-#     Remarks: Note this function fails to process the int in std::vector.
-#     This should be processed prior.
-#
-#     @param t: The type to process.
-#     @return: List of types within t hidden behind pointers.
-#     """
-#     result = list()
-#
-#     if is_function_pointer(t):
-#         extracted = (
-#             get_function_pointer_return_type(t),
-#             *get_function_pointer_arg_types(t)
-#         )
-#         for param in extracted:
-#             result += flatten_pointers(param)
-#     else:
-#         if t.kind == clang.cindex.TypeKind.POINTER:
-#             t = follow_pointer(t)
-#         result.append(t)
-#
-#     return result

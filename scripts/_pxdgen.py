@@ -140,7 +140,7 @@ class PXDGen:
                     imports.add(i)
 
                 if FLAG_EXTRA_DECLS in self.flags:
-                    fwd_decls = sorted(pxspace.forward_decls, key=lambda v: len(Namespace._recurse_assoc(v)))
+                    fwd_decls = sorted(pxspace.forward_decls, key=lambda v: len(Namespace._get_all_assoc(v.cursor)))
 
                     if not fwd.tell() and len(fwd_decls):
                         fwd.writeline("cdef extern from *:")
@@ -168,7 +168,7 @@ class PXDGen:
                                     fwd.writeline(line)
                             else:
                                 fwd.writeline(decl.declaration)
-                        else:
+                        elif hasattr(decl, "declaration"):
                             fwd.writeline(decl.declaration)
 
                 body.writeline(pxspace.cython_header(os.path.relpath(file, self.opts.relpath)))
