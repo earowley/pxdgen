@@ -319,6 +319,11 @@ def full_type_repr(ctype: clang.cindex.Type, ref_cursor: clang.cindex.Cursor) ->
     )
 
     def finalize(subtype: clang.cindex.Type):
+        if subtype.spelling in ("bool", "_Bool"):
+            return "bint"
+        if subtype.spelling in ("const bool", "const _Bool"):
+            return "const bint"
+
         decl = subtype.get_declaration()
 
         if decl.kind == clang.cindex.CursorKind.NO_DECL_FOUND:
@@ -398,6 +403,24 @@ def resolve_typename_type(ctype: clang.cindex.Type, parts: List[str]) -> Optiona
             cur = stack.pop()
 
 
+def get_underlying_type(ctype: clang.cindex.Type) -> clang.cindex.Type:
+    """
+    Unwraps the underlying type from pointers, arrays, etc.
+
+    @return: The underlying clang.cindex.Type.
+    """
+    if ctype.kind == clang.cindex.TypeKind.POINTER:
+        while ctype.kind == clang.cindex.TypeKind.POINTER:
+            ctype = ctype.get_pointee()
+    elif ctype.kind in (clang.cindex.TypeKind.LVALUEREFERENCE, clang.cindex.TypeKind.RVALUEREFERENCE):
+        ctype = ctype.get_pointee()
+    elif ctype.kind == clang.cindex.TypeKind.CONSTANTARRAY:
+        while ctype.kind == clang.cindex.TypeKind.CONSTANTARRAY:
+            ctype = ctype.get_array_element_type()
+
+    return ctype
+
+
 def strip_type_ids(cursor: clang.cindex.Cursor) -> str:
     """
     Safest method of stripping type strings, but requires a Cursor object
@@ -454,14 +477,13 @@ def strip_beg_type_ids(s: str) -> str:
     return s
 
 
-def convert_dialect(s: str, bool_replace: bool = False) -> str:
+def convert_dialect(s: str) -> str:
     """
     Converts C++ dialect string to Cython dialect
     string. Replaces template delimiters and removes
     some names that are valid in C(++) but not Cython
 
     @param s: String to convert
-    @param bool_replace: replace any instance of bool with bint
     @return: Converted string
     """
     THROWS = "throw("
@@ -477,10 +499,10 @@ def convert_dialect(s: str, bool_replace: bool = False) -> str:
     else:
         ret = ret.replace("noexcept", '')
 
-    ret = ret.replace("_Bool", "bint").replace("bool ", "bint ").replace("bool,", "bint,").replace("(bool)", "(bint)")
-    ret = ret.replace("restrict ", '').replace("volatile ", '').replace("typename ", '')
+    # ret = ret.replace("_Bool", "bint").replace("bool ", "bint ").replace("bool,", "bint,").replace("(bool)", "(bint)")
+    ret = ret.replace("restrict ", '').replace("volatile ", '').replace("typename ", '').replace("::", '.')
 
-    if bool_replace:
-        ret = ret.replace("bool", "bint")
+    # if bool_replace:
+    #     ret = ret.replace("bool", "bint")
 
     return ret

@@ -168,6 +168,9 @@ class PXDGen:
                                     fwd.writeline(line)
                             else:
                                 fwd.writeline(decl.declaration)
+                        elif hasattr(decl, "lines"):
+                            for line in decl.lines:
+                                fwd.writeline(line)
                         elif hasattr(decl, "declaration"):
                             fwd.writeline(decl.declaration)
 

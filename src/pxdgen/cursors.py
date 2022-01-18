@@ -188,10 +188,10 @@ class DataType(CCursor):
         # and is saved to suffix so that the end
         # result looks like int data[20]
 
-        typename = utils.full_type_repr(self.cursor.type, self.cursor)
+        typename = self.typename
 
-        if self.cursor.type.get_declaration().is_anonymous() and not typename:
-            typename = f"char[{self.cursor.type.get_size()}]"
+        if utils.get_underlying_type(self.cursor.type).get_declaration().is_anonymous():
+            typename = f"char{typename}[{self.cursor.type.get_size()}]"
 
         suffix = ''
         ob = typename.find('[')
@@ -200,9 +200,11 @@ class DataType(CCursor):
             suffix = typename[ob:]
             typename = typename[:ob].strip()
 
-        ret = f"{typename} {self.name}{suffix}"
+        return f"{utils.convert_dialect(typename)} {self.name}{suffix}"
 
-        return utils.convert_dialect(ret)
+    @property
+    def typename(self) -> str:
+        return utils.full_type_repr(self.cursor.type, self.cursor)
 
     @property
     def _function_ptr_declaration(self) -> str:
@@ -220,6 +222,11 @@ class DataType(CCursor):
 
 
 class Function(CCursor):
+    CYTHON_UNSUPPORTED = {
+        "operator&=",
+        "operator|=",
+        "operator->"
+    }
     def __init__(self, cursor: clang.cindex.Cursor, *_):
         """
         Represents a functional type declaration.
@@ -233,6 +240,16 @@ class Function(CCursor):
         self._args = [DataType(child) for child in cursor.get_children() if child.kind == clang.cindex.CursorKind.PARM_DECL]
 
     @property
+    def lines(self) -> Generator[str, None, None]:
+        n = self.first_optional_arg_index
+        restype = utils.full_type_repr(self.cursor.result_type, self.cursor)
+        restype = utils.convert_dialect(restype).strip()
+        comment = "#  " if self.cursor.spelling in Function.CYTHON_UNSUPPORTED else ''
+
+        for i in range(n, len(self._args) + 1):
+            yield comment + f"{restype} {self.name}{self._tmpl_params}({', '.join(self._argument_declarations(i))})"
+
+    @property
     def declaration(self) -> str:
         """
         The full function declaration for this function
@@ -242,9 +259,9 @@ class Function(CCursor):
         """
 
         restype = utils.full_type_repr(self.cursor.result_type, self.cursor)
-        restype = utils.convert_dialect(restype, True).strip()
+        restype = utils.convert_dialect(restype).strip()
 
-        return f"{restype} {self.name}{self._tmpl_params}({', '.join(self._argument_declarations)})"
+        return f"{restype} {self.name}{self._tmpl_params}({', '.join(self._argument_declarations(len(self._args)))})"
 
     @property
     def is_static(self) -> bool:
@@ -265,19 +282,43 @@ class Function(CCursor):
         return result
 
     @property
-    def _argument_declarations(self) -> Generator[str, None, None]:
+    def first_optional_arg_index(self) -> int:
+        n = len(self._args)
+
+        for i, arg in enumerate(self._args):
+            if any(child.kind == clang.cindex.CursorKind.UNEXPOSED_EXPR for child in arg):
+                n = i
+                break
+
+        return n
+
+    def _argument_declarations(self, nargs: int) -> Generator[str, None, None]:
         """
         Yields the Cython argument declarations of this function.
         """
-        for mem in self._args:
+        for mem in self._args[:nargs]:
             # `=*` syntax seems to only work for cdef functions defined in pyx files
             # suffix = "=*" if any(child.kind == clang.cindex.CursorKind.UNEXPOSED_EXPR for child in mem) else ''
-            yield mem.declaration
+            yield utils.convert_dialect(mem.typename)
 
 
 class Constructor(Function):
     def __init__(self, cursor: clang.cindex.Cursor, *_):
         super().__init__(cursor)
+
+    @property
+    def lines(self) -> Generator[str, None, None]:
+        spelling = self.name
+        restype = "void " if self._tmpl_params else ''
+        n = self.first_optional_arg_index
+
+        try:
+            spelling = spelling[:spelling.index('<')]
+        except ValueError:
+            pass
+
+        for i in range(n, len(self._args) + 1):
+            yield f"{restype}{spelling}{self._tmpl_params}({', '.join(self._argument_declarations(i))})"
 
     @property
     def declaration(self) -> str:
@@ -297,7 +338,7 @@ class Constructor(Function):
         except ValueError:
             pass
 
-        return f"{restype}{spelling}{self._tmpl_params}({', '.join(self._argument_declarations)})"
+        return f"{restype}{spelling}{self._tmpl_params}({', '.join(self._argument_declarations(len(self._args)))})"
 
 
 class Enumeration(CCursor):
@@ -405,18 +446,9 @@ class Typedef(CCursor):
         """
         super().__init__(cursor)
 
-        while cursor.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
-            cursor = cursor.underlying_typedef_type.get_declaration()
-            if cursor.kind == clang.cindex.CursorKind.NO_DECL_FOUND:
-                self._base = None
-                break
-        else:
-            self._base = cursor
-
     @property
     def associated_types(self) -> Set[CCursor]:
         result = set()
-        # cursor = self.cursor.underlying_typedef_type.get_declaration()
         cursor = self.underlying_type.get_declaration()
 
         if cursor.kind != clang.cindex.CursorKind.NO_DECL_FOUND:
@@ -430,21 +462,9 @@ class Typedef(CCursor):
         """
         Unwraps the underlying type from pointers, arrays, etc.
 
-        @return: The underlying type. A better form of underlying_typedef_type
-        @rtype: The type underlying this typedef
+        @return: The underlying type. A better form of `underlying_typedef_type`.
         """
-        ctype = self.cursor.underlying_typedef_type
-
-        if ctype.kind == clang.cindex.TypeKind.POINTER:
-            while ctype.kind == clang.cindex.TypeKind.POINTER:
-                ctype = ctype.get_pointee()
-        elif ctype.kind in (clang.cindex.TypeKind.LVALUEREFERENCE, clang.cindex.TypeKind.RVALUEREFERENCE):
-            ctype = ctype.get_pointee()
-        elif ctype.kind == clang.cindex.TypeKind.CONSTANTARRAY:
-            while ctype.kind == clang.cindex.TypeKind.CONSTANTARRAY:
-                ctype = ctype.get_array_element_type()
-
-        return ctype
+        return utils.get_underlying_type(self.cursor.underlying_typedef_type)
 
     @property
     def declaration(self) -> str:
@@ -465,21 +485,14 @@ class Typedef(CCursor):
 
             return f"ctypedef {left} ({'*' * ndim}{self.name})({right.replace('(void)', '()')})"
 
-        # spelling can be empty if typedef names an anonymous structure
-        spelling = utils.convert_dialect(utils.full_type_repr(utt, self.cursor)) or f"char[{utt.get_size()}]"
+        spelling = utils.convert_dialect(utils.full_type_repr(utt, self.cursor))
+        ut = self.underlying_type
+
+        # spelling can be empty or `*`s if typedef names an unnamed structure
+        if ut.get_declaration().spelling == '':
+            spelling = f"char{spelling}[{ut.get_size()}]"
 
         return f"ctypedef {spelling} {self.name}"
-
-    @property
-    def base(self) -> Optional[clang.cindex.Cursor]:
-        """
-        The Clang Cursor for the declaration of the type which
-        this typedef represents. If the declaration is not found,
-        None is returned.
-
-        @return: Union[clang.cindex.Cursor, None].
-        """
-        return self._base
 
 
 class Struct(CCursor):
@@ -536,6 +549,10 @@ class Struct(CCursor):
         return d is None or d != self.cursor
 
     @property
+    def needs_forward_decl(self) -> bool:
+        return self.cursor.get_definition() is None
+
+    @property
     def name(self) -> str:
         return self._name
 
@@ -572,8 +589,12 @@ class Struct(CCursor):
 
         for child in self._children:
             #  Handle static methods on instance side
-            if isinstance(child, Function) and child.is_static:
-                yield "@staticmethod"
+            if isinstance(child, Function):
+                for line in child.lines:
+                    if child.is_static:
+                        yield "@staticmethod"
+                    yield line
+                continue
             if hasattr(child, "cython_header"):
                 if not child.name:
                     anon.append(child.cursor)
@@ -585,11 +606,12 @@ class Struct(CCursor):
                     yield TAB + line
                 continue
             elif isinstance(child, Typedef):
-                if child.cursor in anon:
-                    for line in Namespace._gen_struct_enum(child.cursor, specialize(child.cursor).__class__, True, name=child.name):
+                ut_decl = child.underlying_type.get_declaration()
+                if ut_decl in anon:
+                    for line in Namespace._gen_struct_enum(ut_decl, specialize(ut_decl).__class__, True, name=child.name):
                         yield line
 
-                    anon.remove(child.cursor)
+                    anon.remove(ut_decl)
                     continue
 
             yield child.declaration
@@ -691,7 +713,7 @@ class Namespace:
         @param rel_header_path: Header path relative to the C compiler's include path.
         @return: The Cythonized header for this namespace.
         """
-        base = f"cdef extern from \"{rel_header_path}\""
+        base = f"cdef extern from \"{rel_header_path.replace(os.path.sep, '/')}\""
         namespace = f" namespace \"{self.cpp_name}\":" if self.cpp_name else ':'
 
         return base + namespace
@@ -721,7 +743,7 @@ class Namespace:
                     yield i
             elif child.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
                 typedef = Typedef(child)
-                base = typedef.base
+                base = typedef.underlying_type.get_declaration()
 
                 if base and base in unk:
                     if base.kind == clang.cindex.CursorKind.ENUM_DECL:
@@ -738,7 +760,8 @@ class Namespace:
 
                 yield typedef.declaration
             elif child.kind in STATIC_FUNCTION_KINDS:
-                yield Function(child).declaration
+                for line in Function(child).lines:
+                    yield line
             elif child.kind == clang.cindex.CursorKind.VAR_DECL:
                 yield DataType(child).declaration
             elif child.kind == clang.cindex.CursorKind.UNION_DECL:
