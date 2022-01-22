@@ -381,6 +381,13 @@ def full_type_repr(ctype: clang.cindex.Type, ref_cursor: clang.cindex.Cursor) ->
 
 
 def resolve_typename_type(ctype: clang.cindex.Type, parts: List[str]) -> Optional[clang.cindex.Cursor]:
+    """
+    Try to resolve C++ types that are resolved with `typename`
+
+    @param ctype: The type to resolve.
+    @param parts: Namespace parts eg ["std"].
+    @return: Optional cursor, if one is found.
+    """
     cur = ctype.translation_unit.cursor.get_children()
     stack = []
     looking = 0
@@ -403,22 +410,35 @@ def resolve_typename_type(ctype: clang.cindex.Type, parts: List[str]) -> Optiona
             cur = stack.pop()
 
 
-def get_underlying_type(ctype: clang.cindex.Type) -> clang.cindex.Type:
+def get_underlying_type(ctype: clang.cindex.Type) -> Tuple[clang.cindex.Type, str]:
     """
     Unwraps the underlying type from pointers, arrays, etc.
 
-    @return: The underlying clang.cindex.Type.
+    @return: clang.cindex.Type, token tuple
     """
     if ctype.kind == clang.cindex.TypeKind.POINTER:
-        while ctype.kind == clang.cindex.TypeKind.POINTER:
-            ctype = ctype.get_pointee()
-    elif ctype.kind in (clang.cindex.TypeKind.LVALUEREFERENCE, clang.cindex.TypeKind.RVALUEREFERENCE):
-        ctype = ctype.get_pointee()
+        ndim, t = walk_pointer(ctype)
+        return t, '*' * ndim
+    elif ctype.kind == clang.cindex.TypeKind.LVALUEREFERENCE:
+        return ctype.get_pointee(), '&'
+    elif ctype.kind == clang.cindex.TypeKind.RVALUEREFERENCE:
+        return ctype.get_pointee(), "&&"
     elif ctype.kind == clang.cindex.TypeKind.CONSTANTARRAY:
+        parts = list()
+
         while ctype.kind == clang.cindex.TypeKind.CONSTANTARRAY:
+            parts.append(ctype.get_array_size())
             ctype = ctype.get_array_element_type()
 
-    return ctype
+        parts.reverse()
+        token = ''
+
+        for t in parts:
+            token += f"[{t}]"
+
+        return ctype, token
+
+    return ctype, ''
 
 
 def strip_type_ids(cursor: clang.cindex.Cursor) -> str:
@@ -499,10 +519,6 @@ def convert_dialect(s: str) -> str:
     else:
         ret = ret.replace("noexcept", '')
 
-    # ret = ret.replace("_Bool", "bint").replace("bool ", "bint ").replace("bool,", "bint,").replace("(bool)", "(bint)")
     ret = ret.replace("restrict ", '').replace("volatile ", '').replace("typename ", '').replace("::", '.')
-
-    # if bool_replace:
-    #     ret = ret.replace("bool", "bint")
 
     return ret

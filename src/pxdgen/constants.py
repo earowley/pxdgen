@@ -54,6 +54,10 @@ BASIC_DATA_KINDS = (
     kinds.VAR_DECL,
     kinds.FIELD_DECL
 )
+ANON_KINDS = STRUCTURED_DATA_KINDS + (
+    kinds.ENUM_DECL,
+    kinds.UNION_DECL
+)
 IGNORED_IMPORTS = {
     "size_t",
     "std::size_t",

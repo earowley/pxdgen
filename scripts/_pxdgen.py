@@ -22,10 +22,23 @@ import glob
 import clang.cindex
 import pxdgen.utils as utils
 from pxdgen.utils import TabWriter
-from pxdgen.cursors import Namespace, Typedef, specialize
+from pxdgen.cursors import Namespace
+from colorama import Fore, Style, init as colorama_init
+colorama_init()
 
 
 FLAG_EXTRA_DECLS = "includerefs"
+FLAG_INCLUDE_ALL = "includeall"
+FLAG_ERROR_EXIT = "safe"
+
+
+SEVERITY = {
+    0: '',
+    1: Fore.WHITE + "Remark" + Fore.RESET,
+    2: Fore.YELLOW + "Warning" + Fore.RESET,
+    3: Fore.RED + "Error" + Fore.RESET,
+    4: Style.BRIGHT + Fore.RED + "Fatal" + Fore.RESET
+}
 
 
 class PXDGen:
@@ -108,10 +121,6 @@ class PXDGen:
                 print(h)
             print()
 
-        for gt in self.opts.headers:
-            for file in glob.glob(gt):
-                valid_headers.add(os.path.abspath(file))
-
         ctx = dict()
 
         for file in to_parse:
@@ -120,13 +129,18 @@ class PXDGen:
             if self.opts.verbose:
                 print("Parsing", file)
 
-                for d in tu.diagnostics:
-                    print(d)
-                print()
+            for d in tu.diagnostics:
+                if d.severity == 0:
+                    continue
+                if self.opts.verbose and d.severity < 3:
+                    print(f"{SEVERITY[d.severity]}: {d.spelling}")
+                elif d.severity >= 3:
+                    print(f"{SEVERITY[d.severity]}: {d.spelling}")
+                    if FLAG_ERROR_EXIT in self.flags:
+                        exit()
 
             namespaces = utils.find_namespaces(tu.cursor, valid_headers)
             namespaces[''] = [tu.cursor]
-            anon = list()
 
             for space_name, cursors in namespaces.items():
                 pxspace = Namespace(cursors, self.opts.recursive, file, valid_headers)
@@ -136,7 +150,7 @@ class PXDGen:
 
                 imports, fwd, body = ctx.get(space_name, (set(), TabWriter(), TabWriter()))
 
-                for i in pxspace.import_strings:
+                for i in pxspace.import_strings(FLAG_INCLUDE_ALL in self.flags):
                     imports.add(i)
 
                 if FLAG_EXTRA_DECLS in self.flags:
@@ -146,41 +160,13 @@ class PXDGen:
                         fwd.writeline("cdef extern from *:")
                         fwd.indent()
 
-                    # This way because not certain of declaration order in fwd_decls
                     for decl in fwd_decls:
-                        if not decl.name:
-                            anon.append(decl.cursor)
+                        for line in decl.lines():
+                            fwd.writeline(line)
 
-                    for decl in anon:
-                        fwd_decls.remove(specialize(decl))
-
-                    for decl in fwd_decls:
-                        if hasattr(decl, "cython_header"):
-                            fwd.writeline(decl.cython_header(False))
-                            fwd.indent()
-                            for mem in decl.members():
-                                fwd.writeline(mem)
-                            fwd.unindent()
-                        elif isinstance(decl, Typedef):
-                            utt = decl.underlying_type.get_declaration()
-                            if utt in anon:
-                                for line in Namespace._gen_struct_enum(utt, specialize(utt).__class__, True, name=decl.name):
-                                    fwd.writeline(line)
-                            else:
-                                fwd.writeline(decl.declaration)
-                        elif hasattr(decl, "lines"):
-                            for line in decl.lines:
-                                fwd.writeline(line)
-                        elif hasattr(decl, "declaration"):
-                            fwd.writeline(decl.declaration)
-
-                body.writeline(pxspace.cython_header(os.path.relpath(file, self.opts.relpath)))
-                body.indent()
-
-                for line in pxspace.members():
+                for line in pxspace.lines(os.path.relpath(file, self.opts.relpath)):
                     body.writeline(line)
 
-                body.unindent()
                 body.writeline('')
                 ctx[space_name] = (imports, fwd, body)
 
@@ -198,7 +184,7 @@ class PXDGen:
             else:
                 stream = sys.stdout
 
-            for i in imports:
+            for i in sorted(imports):
                 stream.write(i)
                 stream.write('\n')
 
@@ -230,10 +216,6 @@ def main():
     argp.add_argument("-r", "--recursive",
                       action="store_true",
                       help="Include declarations from all nested headers")
-    argp.add_argument("-H", "--headers",
-                      action="append",
-                      default=[],
-                      help="A glob term of headers to include from")
     argp.add_argument("-x", "--language",
                       help="Force Clang to use the specified language for interpretation")
     argp.add_argument("-I", "--include",

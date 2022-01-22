@@ -38,6 +38,9 @@ namespace Foo {
 
         // RVR decl
         T&& tt;
+        
+        // bool renames to bint
+        bool truefalse;
 
         // Inner class decl
         class Inner {
