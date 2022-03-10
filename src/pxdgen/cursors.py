@@ -388,6 +388,11 @@ class Function(CCursor):
             # suffix = "=*" if any(child.kind == clang.cindex.CursorKind.UNEXPOSED_EXPR for child in mem) else ''
             yield utils.convert_dialect(mem.typename)
 
+        # Variadic argument does not get represented in children or get_arguments()
+        # So utils function uses tokens
+        if utils.is_function_variadic(self.cursor):
+            yield "..."
+
 
 class Constructor(Function):
     def __init__(self, cursor: clang.cindex.Cursor):
@@ -529,23 +534,6 @@ class Typedef(CCursor):
         @param cursor: Clang typedef Cursor.
         """
         super().__init__(cursor)
-
-    # @property
-    # def associated_types(self) -> Set[CCursor]:
-    #     """
-    #     Associated types for this typedef.
-    #
-    #     @return: Set[CCursor]
-    #     """
-    #     result = set()
-    #     cursor = self.underlying_type.get_declaration()
-    #
-    #     if cursor.kind != clang.cindex.CursorKind.NO_DECL_FOUND:
-    #         cc = CCursor(cursor)
-    #         result.update(cc.associated_types)
-    #         result.add(cc)
-    #
-    #     return result
 
     @property
     def underlying_type(self) -> clang.cindex.Type:

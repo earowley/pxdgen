@@ -28,7 +28,7 @@ colorama_init()
 
 
 FLAG_EXTRA_DECLS = "includerefs"
-FLAG_INCLUDE_ALL = "includeall"
+FLAG_IMPORT_ALL = "importall"
 FLAG_ERROR_EXIT = "safe"
 
 
@@ -151,7 +151,7 @@ class PXDGen:
                 # imports, fwd, body = ctx.get(space_name, (set(), TabWriter(), TabWriter()))
                 imports, fwd, body = set(), TabWriter(), TabWriter()
 
-                for i in pxspace.import_strings(FLAG_INCLUDE_ALL in self.flags):
+                for i in pxspace.import_strings(FLAG_IMPORT_ALL in self.flags):
                     imports.add(i)
 
                 if FLAG_EXTRA_DECLS in self.flags:
