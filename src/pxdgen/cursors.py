@@ -60,17 +60,15 @@ def block(children: List[CCursor], anonymous: List[clang.cindex.Cursor], name: s
     @param staticheader: Yield @staticmethod for static methods.
     @return: Generator[str]
     """
-    # If this is a namespace, yield the header first
-    if not staticheader:
-        yield header
-
-    # Output the anonymous declarations
-    for i, cursor in enumerate(anonymous):
-        for line in specialize(cursor).lines(name=f"pxdgen_anon_{name}_{i}"):
-            yield (TAB if not staticheader else '') + line
 
     if staticheader:
-        yield header
+        # Output the anonymous declarations first in struct/union types
+        for i, cursor in enumerate(anonymous):
+            for line in specialize(cursor).lines(name=f"pxdgen_anon_{name}_{i}"):
+                yield line
+
+    yield header
+    anon_decls = [False] * len(anonymous)
 
     for child in children:
         if child.anonymous:
@@ -80,13 +78,29 @@ def block(children: List[CCursor], anonymous: List[clang.cindex.Cursor], name: s
             decl = ut.get_declaration()
 
             if decl in anonymous:
-                yield TAB + f"pxdgen_anon_{name}_{anonymous.index(decl)}{token} {child.name}"
+                i = anonymous.index(decl)
+
+                if not anon_decls[i]:
+                    anon_decls[i] = True
+
+                    for line in specialize(anonymous[i]).lines(name=f"pxdgen_anon_{name}_{i}"):
+                        yield TAB + line
+
+                yield TAB + f"pxdgen_anon_{name}_{i}{token} {child.name}"
                 continue
         elif isinstance(child, Typedef):
             ut, token = utils.get_underlying_type(child.cursor.underlying_typedef_type)
             ut = ut.get_declaration()
 
             if ut in anonymous:
+                i = anonymous.index(ut)
+
+                if not anon_decls[i]:
+                    anon_decls[i] = True
+
+                    for line in specialize(anonymous[i]).lines(name=f"pxdgen_anon_{name}_{i}"):
+                        yield TAB + line
+
                 yield TAB + f"ctypedef pxdgen_anon_{name}_{anonymous.index(ut)}{token} {child.name}"
                 continue
 
@@ -194,8 +208,8 @@ class CCursor:
                     result.add(CCursor(cdef))
                 else:
                     cdef = child.type.get_declaration()
-                    assert cdef.kind != clang.cindex.CursorKind.NO_DECL_FOUND
-                    result.add(CCursor(cdef))
+                    if cdef.kind != clang.cindex.CursorKind.NO_DECL_FOUND:
+                        result.add(CCursor(cdef))
 
         return result
 
@@ -516,22 +530,22 @@ class Typedef(CCursor):
         """
         super().__init__(cursor)
 
-    @property
-    def associated_types(self) -> Set[CCursor]:
-        """
-        Associated types for this typedef.
-
-        @return: Set[CCursor]
-        """
-        result = set()
-        cursor = self.underlying_type.get_declaration()
-
-        if cursor.kind != clang.cindex.CursorKind.NO_DECL_FOUND:
-            cc = CCursor(cursor)
-            result.update(cc.associated_types)
-            result.add(cc)
-
-        return result
+    # @property
+    # def associated_types(self) -> Set[CCursor]:
+    #     """
+    #     Associated types for this typedef.
+    #
+    #     @return: Set[CCursor]
+    #     """
+    #     result = set()
+    #     cursor = self.underlying_type.get_declaration()
+    #
+    #     if cursor.kind != clang.cindex.CursorKind.NO_DECL_FOUND:
+    #         cc = CCursor(cursor)
+    #         result.update(cc.associated_types)
+    #         result.add(cc)
+    #
+    #     return result
 
     @property
     def underlying_type(self) -> clang.cindex.Type:
@@ -628,20 +642,6 @@ class Struct(CCursor):
         @return: Boolean.
         """
         return self._is_cppclass
-
-    @property
-    def is_forward_decl(self) -> bool:
-        """
-        Whether this class is a forward declaration.
-
-        @return: Boolean.
-        """
-        d = self.cursor.get_definition()
-        return d is None or d != self.cursor
-
-    @property
-    def needs_forward_decl(self) -> bool:
-        return self.cursor.get_definition() is None
 
     @property
     def associated_types(self) -> Set[CCursor]:
@@ -816,10 +816,9 @@ class Namespace:
             return False
         if self.class_space and child.kind in Struct.INSTANCE_TYPES:
             return False
-        cc = specialize(child)
-        if type(cc) is CCursor:
+        if utils.is_forward_decl(child):
             return False
-        if isinstance(cc, Struct) and cc.is_forward_decl:
+        if type(specialize(child)) is CCursor:
             return False
         try:
             return (

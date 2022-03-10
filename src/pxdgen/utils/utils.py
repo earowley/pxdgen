@@ -146,6 +146,17 @@ def is_constructor(cursor: clang.cindex.Cursor) -> bool:
     return False
 
 
+def is_forward_decl(cursor: clang.cindex.Cursor) -> bool:
+    """
+    Returns whether this cursor is a forward declaration.
+
+    @param cursor: Clang cursor.
+    @return: bool.
+    """
+    d = cursor.get_definition()
+    return cursor.kind in ANON_KINDS and (d is None or d != cursor)
+
+
 def walk_pointer(t: clang.cindex.Type) -> Tuple[int, clang.cindex.Type]:
     """
     Follow a pointer to its underlying type.
@@ -281,11 +292,28 @@ def get_import_string(importer: clang.cindex.Cursor, importee: clang.cindex.Curs
     importee_space = containing_space(importee, lambda p: p.kind in SPACE_KINDS)
     addr = f"{importee_space}::{importee.spelling}".strip("::")
 
-    if importer_home == importee_home or addr in IGNORED_IMPORTS or not importee_space:
+    if addr in IGNORED_IMPORTS or not importee_space:
         return None
 
     importee_dot = containing_space(importee, lambda p: p.kind != clang.cindex.CursorKind.NAMESPACE).split("::")[1:]
     importee_dot.append(importee.spelling)
+
+    if importer_home == importee_home:
+        importer_file = importer.location.file
+        importee_file = importee.location.file
+
+        if importer_file is None or importee_file is None:
+            return None
+        if importer_file.name == importee_file.name and not is_forward_decl(importee):
+            return None
+
+        # ipath = os.path.basename(importee_file.name)
+        # i = ipath.rfind('.')
+        #
+        # if i != -1:
+        #     ipath = ipath[:i]
+
+        return f"from {importee_home.replace('::', '.')} cimport {importee_dot[0]}"
 
     return "from {} cimport {} as {}".format(
         importee_home.replace('::', '.'),

@@ -148,7 +148,8 @@ class PXDGen:
                 if not pxspace.has_declarations:
                     continue
 
-                imports, fwd, body = ctx.get(space_name, (set(), TabWriter(), TabWriter()))
+                # imports, fwd, body = ctx.get(space_name, (set(), TabWriter(), TabWriter()))
+                imports, fwd, body = set(), TabWriter(), TabWriter()
 
                 for i in pxspace.import_strings(FLAG_INCLUDE_ALL in self.flags):
                     imports.add(i)
@@ -168,34 +169,45 @@ class PXDGen:
                     body.writeline(line)
 
                 body.writeline('')
-                ctx[space_name] = (imports, fwd, body)
 
-        for space_name in ctx:
-            imports, fwd, body = ctx[space_name]
+                if self.opts.output:
+                    pxd = os.path.splitext(os.path.basename(file))[0] + ".pxd"
+                    out_path = os.path.join(self.opts.output, space_name.replace("::", os.path.sep))
+                    out_file = os.path.join(out_path, pxd)
+                    init = ctx.get(space_name, TabWriter())
+                    init_import = os.path.relpath(out_file, self.opts.output).replace(os.path.sep, '.').replace(".pxd", '')
+                    init.writeline(f"from {init_import} cimport *")
+                    ctx[space_name] = init
 
-            if self.opts.output:
+                    if not os.path.isdir(out_path):
+                        os.makedirs(out_path)
+
+                    stream = open(out_file, 'w')
+                else:
+                    stream = sys.stdout
+
+                try:
+                    for i in sorted(imports):
+                        stream.write(i)
+                        stream.write('\n')
+
+                    stream.write('\n')
+
+                    if FLAG_EXTRA_DECLS in self.flags:
+                        stream.write(fwd.getvalue())
+                        stream.write('\n')
+
+                    stream.write(body.getvalue())
+                    stream.write('\n')
+                finally:
+                    stream.close()
+
+        if self.opts.output:
+            for space_name in ctx:
                 out_path = os.path.join(self.opts.output, space_name.replace("::", os.path.sep))
 
-                if not os.path.isdir(out_path):
-                    os.makedirs(out_path)
-
-                out_file = "__init__.pxd" if space_name else f"{self.opts.output}.pxd"
-                stream = open(os.path.join(out_path, out_file), 'w')
-            else:
-                stream = sys.stdout
-
-            for i in sorted(imports):
-                stream.write(i)
-                stream.write('\n')
-
-            stream.write('\n')
-
-            if FLAG_EXTRA_DECLS in self.flags:
-                stream.write(fwd.getvalue())
-                stream.write('\n')
-
-            stream.write(body.getvalue())
-            stream.write('\n')
+                with open(os.path.join(out_path, "__init__.pxd"), 'w') as out:
+                    out.write(ctx[space_name].getvalue())
 
 
 def main():
