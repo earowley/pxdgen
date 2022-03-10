@@ -278,7 +278,19 @@ class DataType(CCursor):
 
     @property
     def typename(self) -> str:
+        if self.is_function_pointer:
+            return self._function_ptr_typename
+
         return utils.full_type_repr(self.cursor.type, self.cursor)
+
+    @property
+    def _function_ptr_typename(self) -> str:
+        ndim, _ = utils.walk_pointer(self.cursor.type)
+        result = utils.get_function_pointer_return_type(self.cursor.type)
+        args = utils.get_function_pointer_arg_types(self.cursor.type)
+        ret = f"{utils.full_type_repr(result, self.cursor)} ({'*' * ndim})({','.join(utils.full_type_repr(arg, self.cursor) for arg in args)})"
+
+        return utils.convert_dialect(ret.replace("(void)", "()"))
 
     @property
     def _function_ptr_declaration(self) -> str:
