@@ -60,15 +60,16 @@ def block(children: List[CCursor], anonymous: List[clang.cindex.Cursor], name: s
     @param staticheader: Yield @staticmethod for static methods.
     @return: Generator[str]
     """
+    anon_decls = [False] * len(anonymous)
 
     if staticheader:
         # Output the anonymous declarations first in struct/union types
         for i, cursor in enumerate(anonymous):
             for line in specialize(cursor).lines(name=f"pxdgen_anon_{name}_{i}"):
                 yield line
+            anon_decls[i] = True
 
     yield header
-    anon_decls = [False] * len(anonymous)
 
     for child in children:
         if child.anonymous:
@@ -834,6 +835,12 @@ class Namespace:
                     decl = child.get_definition()
 
                     if decl is not None:
-                        result.add(specialize(decl))
+                        spec = specialize(decl)
+
+                        # Check to avoid parsing the same type multiple times..
+                        # Greatly reduces the time required
+                        if spec not in result:
+                            stack.append(decl)
+                            result.add(spec)
 
         return result
