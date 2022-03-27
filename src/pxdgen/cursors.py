@@ -155,8 +155,10 @@ class CCursor:
 
     @property
     def file(self) -> Optional[str]:
-        l = self.cursor.location
-        return None if l is None else os.path.abspath(l.file.name)
+        try:
+            return os.path.abspath(self.cursor.location.file.name)
+        except AttributeError:
+            return None
 
     @property
     def anonymous(self) -> bool:
