@@ -739,8 +739,8 @@ class Namespace:
             for t in Namespace._get_all_assoc(child):
                 if (
                     t.file not in self.valid_headers and
-                    t.address not in IGNORED_IMPORTS and
-                    t.address not in STD_IMPORTS
+                    t.address not in IGNORED_IMPORTS #  and
+                    #  t.address not in STD_IMPORTS
                 ):
                     result.add(t)
 

@@ -148,11 +148,7 @@ class PXDGen:
                 if not pxspace.has_declarations:
                     continue
 
-                # imports, fwd, body = ctx.get(space_name, (set(), TabWriter(), TabWriter()))
                 imports, fwd, body = set(), TabWriter(), TabWriter()
-
-                for i in pxspace.import_strings(FLAG_IMPORT_ALL in self.flags):
-                    imports.add(i)
 
                 if FLAG_EXTRA_DECLS in self.flags:
                     fwd_decls = sorted(pxspace.forward_decls, key=lambda v: len(Namespace._get_all_assoc(v.cursor)))
@@ -164,6 +160,9 @@ class PXDGen:
                     for decl in fwd_decls:
                         for line in decl.lines():
                             fwd.writeline(line)
+                else:  # Imports are disabled if extra declarations are defined
+                    for i in pxspace.import_strings(FLAG_IMPORT_ALL in self.flags):
+                        imports.add(i)
 
                 for line in pxspace.lines(os.path.relpath(file, self.opts.relpath)):
                     body.writeline(line)
