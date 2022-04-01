@@ -22,7 +22,7 @@ import glob
 import clang.cindex
 import pxdgen.utils as utils
 from pxdgen.utils import TabWriter
-from pxdgen.cursors import Namespace
+from pxdgen.cursors import Namespace, block
 from colorama import Fore, Style, init as colorama_init
 colorama_init()
 
@@ -153,12 +153,8 @@ class PXDGen:
                 if FLAG_EXTRA_DECLS in self.flags:
                     fwd_decls = sorted(pxspace.forward_decls, key=lambda v: len(Namespace._get_all_assoc(v.cursor)))
 
-                    if not fwd.tell() and len(fwd_decls):
-                        fwd.writeline("cdef extern from *:")
-                        fwd.indent()
-
-                    for decl in fwd_decls:
-                        for line in decl.lines():
+                    if len(fwd_decls):
+                        for line in block(fwd_decls, "toplevel", "cdef extern from *:", False):
                             fwd.writeline(line)
                 else:  # Imports are disabled if extra declarations are defined
                     for i in pxspace.import_strings(FLAG_IMPORT_ALL in self.flags):

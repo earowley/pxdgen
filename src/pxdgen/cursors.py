@@ -28,8 +28,8 @@ def specialize(cursor: clang.cindex.Cursor) -> CCursor:
     Determine what abstracted class defined in this
     module to use for a specific cursor.
 
-    @param cursor: A cursor to convert to a class from this module.
-    @return: The converted type.
+    @param cursor : A cursor to convert to a class from this module.
+    @return       : The converted type.
     """
     if cursor.kind in BASIC_DATA_KINDS:
         return DataType(cursor)
@@ -49,68 +49,114 @@ def specialize(cursor: clang.cindex.Cursor) -> CCursor:
         return CCursor(cursor)
 
 
-def block(children: List[CCursor], anonymous: List[clang.cindex.Cursor], name: str, header: str, staticheader: bool) -> Generator[str, None, None]:
+def block(children: List[CCursor], name: str, header: str, restrict: bool) -> Generator[str, None, None]:
     """
     Iterate over the lines of a block type.
 
-    @param children: The children of the block.
-    @param anonymous: Anonymous types within the block.
-    @param name: The name of the block.
-    @param header: The header of the block to yield.
-    @param staticheader: Yield @staticmethod for static methods.
-    @return: Generator[str]
+    @param children : The children of the block.
+    @param name     : The name of the block. Used for naming anonymous types.
+    @param header   : The header of the block to yield.
+    @param restrict : A restricted space such as a C struct that must
+                      have restricted declarations.
+    @return         : Generator[str]
     """
-    anon_decls = [False] * len(anonymous)
-
-    if staticheader:
-        # Output the anonymous declarations first in struct/union types
-        for i, cursor in enumerate(anonymous):
-            for line in specialize(cursor).lines(name=f"pxdgen_anon_{name}_{i}"):
-                yield line
-            anon_decls[i] = True
-
-    yield header
+    forward_decls = list()
+    anonymous_decls = list()
 
     for child in children:
-        if child.anonymous:
+        if child.forward:
+            forward_decls.append(child)
+        elif child.anonymous:
+            anonymous_decls.append(child)
+        for assoc in CCursor._base_assoc_types(child.cursor):
+            if assoc.forward:
+                forward_decls.append(assoc)
+            elif assoc.anonymous:
+                anonymous_decls.append(assoc)
+
+    forward_decls = list(set(forward_decls))
+    anonymous_decls = list(set(anonymous_decls))
+    prefix = '' if restrict else TAB
+
+    if not restrict:
+        yield header
+
+    for i, cursor in enumerate(anonymous_decls):
+        for line in cursor.lines(name=f"pxdgen_anon_{name}_{i}"):
+            yield prefix + line
+    for decl in forward_decls:
+        for line in decl.lines():
+            yield prefix + line
+
+    if restrict:
+        yield header
+
+    typedefs = list()
+    declared_typedefs = list()
+    count = 0
+
+    for child in children:
+        if child.anonymous or child.forward:
             continue
+        if child.cursor.kind in ANON_KINDS and not child.name:
+            typedefs.append(child)
+            continue
+        count += 1
         if isinstance(child, DataType):
             ut, token = utils.get_underlying_type(child.cursor.type)
             decl = ut.get_declaration()
 
-            if decl in anonymous:
-                i = anonymous.index(decl)
+            try:
+                ind = anonymous_decls.index(decl)
+            except ValueError:
+                ind = -1
 
-                if not anon_decls[i]:
-                    anon_decls[i] = True
+            if ind != -1:
+                i = token.find('[')
 
-                    for line in specialize(anonymous[i]).lines(name=f"pxdgen_anon_{name}_{i}"):
-                        yield TAB + line
+                if i != -1:
+                    suffix = token[i:]
+                    token = token[:i]
+                else:
+                    suffix = ''
 
-                yield TAB + f"pxdgen_anon_{name}_{i}{token} {child.name}"
+                yield TAB + f"pxdgen_anon_{name}_{ind}{token} {child.name}{suffix}"
                 continue
         elif isinstance(child, Typedef):
             ut, token = utils.get_underlying_type(child.cursor.underlying_typedef_type)
-            ut = ut.get_declaration()
+            utd = ut.get_declaration()
 
-            if ut in anonymous:
-                i = anonymous.index(ut)
+            try:
+                ind = typedefs.index(utd)
+            except ValueError:
+                ind = -1
 
-                if not anon_decls[i]:
-                    anon_decls[i] = True
+            if ind != -1:
+                td = typedefs.pop(ind)
 
-                    for line in specialize(anonymous[i]).lines(name=f"pxdgen_anon_{name}_{i}"):
-                        yield TAB + line
+                for line in td.lines(name=child.name, typedef=True):
+                    yield TAB + line
 
-                yield TAB + f"ctypedef pxdgen_anon_{name}_{anonymous.index(ut)}{token} {child.name}"
+                declared_typedefs.append((td, child.name))
+                continue
+
+            found = False
+
+            for decl, name in declared_typedefs:
+                if decl == utd:
+                    yield TAB + f"ctypedef {name}{token} {child.name}"
+                    found = True
+                    break
+
+            if found:
                 continue
 
         for line in child.lines():
-            if staticheader and isinstance(child, Function) and child.is_static:
+            if restrict and isinstance(child, Function) and child.is_static_method:
                 yield TAB + "@staticmethod"
             yield TAB + line
 
-    if not len(children):
+    if not count:
         yield TAB + "pass"
 
 
@@ -145,6 +191,15 @@ class CCursor:
         return self.cursor.kind in STRUCTURED_DATA_KINDS
 
     @property
+    def is_static(self) -> bool:
+        """
+        Whether the storage for this element is static.
+
+        @return: Boolean.
+        """
+        return self.cursor.storage_class == clang.cindex.StorageClass.STATIC
+
+    @property
     def parent(self) -> Optional[CCursor]:
         p = self.cursor.lexical_parent
         return None if p is None else specialize(p)
@@ -162,11 +217,11 @@ class CCursor:
 
     @property
     def anonymous(self) -> bool:
-        return self.cursor.kind in ANON_KINDS and (self.cursor.is_anonymous() or not self.cursor.spelling)
+        return utils.is_anonymous(self.cursor)
 
     @property
-    def anonymous_subtypes(self) -> List[clang.cindex.Cursor]:
-        return [child for child in self.cursor.get_children() if child.kind in ANON_KINDS and (child.is_anonymous() or not child.spelling)]
+    def forward(self) -> bool:
+        return utils.is_forward_decl(self.cursor)
 
     @property
     def name(self) -> str:
@@ -199,20 +254,24 @@ class CCursor:
         Remarks: Int is not included as it is built-in.
         @return: List of cursors containing the definition of each type.
         """
+        return CCursor._base_assoc_types(self.cursor)
+
+    @staticmethod
+    def _base_assoc_types(cursor: clang.cindex.Cursor) -> Set[CCursor]:
         result = set()
 
-        for child in self.cursor.get_children():
+        for child in cursor.get_children():
             if child.kind in (
                     clang.cindex.CursorKind.TYPE_REF,
                     clang.cindex.CursorKind.TEMPLATE_REF
             ):
                 cdef = child.get_definition()
                 if cdef is not None:
-                    result.add(CCursor(cdef))
+                    result.add(specialize(cdef))
                 else:
                     cdef = child.type.get_declaration()
                     if cdef.kind != clang.cindex.CursorKind.NO_DECL_FOUND:
-                        result.add(CCursor(cdef))
+                        result.add(specialize(cdef))
 
         return result
 
@@ -231,15 +290,6 @@ class DataType(CCursor):
         super().__init__(cursor)
 
     @property
-    def is_static(self) -> bool:
-        """
-        Whether the storage for this data type is static.
-
-        @return: Boolean.
-        """
-        return self.cursor.storage_class == clang.cindex.StorageClass.STATIC
-
-    @property
     def is_function_pointer(self) -> bool:
         return utils.is_function_pointer(self.cursor.type)
 
@@ -254,9 +304,10 @@ class DataType(CCursor):
             return self._function_ptr_declaration
 
         ut, token = utils.get_underlying_type(self.cursor.type)
+        utd = ut.get_declaration()
 
         # If the anonymous declaration has not already been handled, default
-        if ut.get_declaration().is_anonymous():
+        if utils.is_anonymous(utd):
             # Pointer coersion is easier for void* than array of chars
             if token.count('*') == len(token):
                 typename = f"void{token}"
@@ -310,7 +361,7 @@ class DataType(CCursor):
 
     def lines(self, **kwargs) -> Generator[str, None, None]:
         """
-        The lines of this DataType, including anonymous declarations.
+        The lines of this DataType.
 
         @param kwargs: None.
         @return: Generator of lines.
@@ -338,7 +389,7 @@ class Function(CCursor):
         self._args = [DataType(child) for child in cursor.get_children() if child.kind == clang.cindex.CursorKind.PARM_DECL]
 
     @property
-    def is_static(self) -> bool:
+    def is_static_method(self) -> bool:
         """
         Whether this function is a static method.
 
@@ -496,11 +547,10 @@ class Union(CCursor):
         """
         super().__init__(cursor)
         self._children = list()
-        self._anon = self.anonymous_subtypes
 
         for child in cursor.get_children():
-            if child.kind == clang.cindex.CursorKind.FIELD_DECL:
-                self._children.append(DataType(child))
+            if child.kind == clang.cindex.CursorKind.FIELD_DECL or child.kind in ANON_KINDS:
+                self._children.append(specialize(child))
 
     @property
     def associated_types(self) -> Set[CCursor]:
@@ -522,7 +572,6 @@ class Union(CCursor):
         name = kwargs.get("name", self.name)
         for line in block(
             self._children,
-            self._anon,
             name,
             Union.cython_header(kwargs.get("typedef", False), name),
             True
@@ -559,11 +608,11 @@ class Typedef(CCursor):
         """
         return utils.get_underlying_type(self.cursor.underlying_typedef_type)[0]
 
-    @property
-    def declaration(self) -> str:
+    def lines(self, **kwargs) -> Generator[str, None, None]:
         """
-        Cython declaration for this typedef.
+        Cython lines for this typedef.
 
+        @param kwargs: None.
         @return: str.
         """
         utt = self.cursor.underlying_typedef_type
@@ -576,28 +625,20 @@ class Typedef(CCursor):
             left = utils.convert_dialect(utils.full_type_repr(result, self.cursor))
             right = ", ".join(utils.convert_dialect(utils.full_type_repr(arg, self.cursor)) for arg in args)
 
-            return f"ctypedef {left} ({'*' * ndim}{self.name})({right.replace('(void)', '()')})"
+            yield f"ctypedef {left} ({'*' * ndim}{self.name})({right.replace('(void)', '()')})"
+            return
 
         spelling = utils.convert_dialect(utils.full_type_repr(utt, self.cursor))
-        ut, token = utils.get_underlying_type(self.cursor.underlying_typedef_type)
+        ut, token = utils.get_underlying_type(utt)
+        utd = ut.get_declaration()
 
-        # spelling can be empty or `*`s if typedef names an unnamed structure
-        if ut.get_declaration().is_anonymous():
-            if token.count('*') == len(token):
-                spelling = f"void{token}"
-            else:
-                spelling = f"char[{utt.get_size()}]"
+        # If typedef of another type has not been handled from larger context
+        if utd.kind in ANON_KINDS and not spelling.strip():
+            for line in specialize(utd).lines(name=self.name, typedef=True):
+                yield line
+            return
 
-        return f"ctypedef {spelling} {self.name}"
-
-    def lines(self, **kwargs) -> Generator[str, None, None]:
-        """
-        Lines of this typedef.
-
-        @param kwargs: None.
-        @return: Generator[str]
-        """
-        yield self.declaration
+        yield f"ctypedef {spelling} {self.name}"
 
 
 class Struct(CCursor):
@@ -626,13 +667,12 @@ class Struct(CCursor):
         self._is_cppclass = utils.is_cppclass(cursor)
         self._children = list()
         self._tmpl_params = utils.get_template_params(cursor)
-        self._anon = self.anonymous_subtypes
 
         for child in cursor.get_children():
             if (
                     child.access_specifier == clang.cindex.AccessSpecifier.PRIVATE or
                     child.kind not in Struct.INSTANCE_TYPES or
-                    child.is_anonymous()
+                    utils.is_extra_decl(child)
             ):
                 continue
             self._children.append(specialize(child))
@@ -667,7 +707,6 @@ class Struct(CCursor):
 
         for line in block(
             self._children,
-            self._anon,
             name,
             self.cython_header(kwargs.get("typedef", False), name),
             True
@@ -739,8 +778,7 @@ class Namespace:
             for t in Namespace._get_all_assoc(child):
                 if (
                     t.file not in self.valid_headers and
-                    t.address not in IGNORED_IMPORTS #  and
-                    #  t.address not in STD_IMPORTS
+                    t.address not in IGNORED_IMPORTS
                 ):
                     result.add(t)
 
@@ -754,12 +792,10 @@ class Namespace:
         @return: Generator[str]
         """
         children = [specialize(c) for c in self.children]
-        anon = [child.cursor for child in children if child.anonymous]
         name = self.cursors[0].address if self.cursors[0].cursor.kind in SPACE_KINDS else 'toplevel'
 
         for line in block(
             children,
-            anon,
             name,
             self.cython_header(rel_header_path),
             False
@@ -819,7 +855,7 @@ class Namespace:
             return False
         if self.class_space and child.kind in Struct.INSTANCE_TYPES:
             return False
-        if utils.is_forward_decl(child):
+        if utils.is_extra_decl(child):
             return False
         if type(specialize(child)) is CCursor:
             return False
@@ -848,13 +884,15 @@ class Namespace:
                 ):
                     decl = child.get_definition()
 
-                    if decl is not None:
-                        spec = specialize(decl)
+                    if decl is None:
+                        continue
 
-                        # Check to avoid parsing the same type multiple times..
-                        # Greatly reduces the time required
-                        if spec not in result:
-                            stack.append(decl)
-                            result.add(spec)
+                    spec = specialize(decl)
+
+                    # Check to avoid parsing the same type multiple times..
+                    # Greatly reduces the time required
+                    if spec not in result:
+                        stack.append(decl)
+                        result.add(spec)
 
         return result

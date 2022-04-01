@@ -153,8 +153,33 @@ def is_forward_decl(cursor: clang.cindex.Cursor) -> bool:
     @param cursor: Clang cursor.
     @return: bool.
     """
+    return cursor.kind in ANON_KINDS and cursor.get_definition() is None
+
+
+def is_extra_decl(cursor: clang.cindex.Cursor) -> bool:
+    """
+    Returns whether this is a forward declaration that is
+    shadowing the type definition.
+
+    @param cursor: Clang cursor.
+    @return: bool.
+    """
     d = cursor.get_definition()
-    return cursor.kind in ANON_KINDS and (d is None or d != cursor)
+    return cursor.kind in ANON_KINDS and d is not None and d != cursor
+
+
+def is_anonymous(cursor: clang.cindex.Cursor) -> bool:
+    """
+    Returns whether this struct/union/enum is
+    an anonymous/unnamed declaration.
+
+    @param cursor: Clang cursor.
+    @return: bool.
+    """
+    return (cursor.kind in ANON_KINDS and (
+               cursor.is_anonymous()
+         )
+    )
 
 
 def walk_pointer(t: clang.cindex.Type) -> Tuple[int, clang.cindex.Type]:
@@ -322,7 +347,7 @@ def get_import_string(importer: clang.cindex.Cursor, importee: clang.cindex.Curs
 
         if importer_file is None or importee_file is None:
             return None
-        if importer_file.name == importee_file.name and not is_forward_decl(importee):
+        if importer_file.name == importee_file.name:
             return None
 
         # ipath = os.path.basename(importee_file.name)
@@ -466,11 +491,14 @@ def get_underlying_type(ctype: clang.cindex.Type) -> Tuple[clang.cindex.Type, st
     """
     if ctype.kind == clang.cindex.TypeKind.POINTER:
         ndim, t = walk_pointer(ctype)
-        return t, '*' * ndim
+        t, tok = get_underlying_type(t)
+        return t, tok + ('*' * ndim)
     elif ctype.kind == clang.cindex.TypeKind.LVALUEREFERENCE:
-        return ctype.get_pointee(), '&'
+        t, tok = get_underlying_type(ctype.get_pointee())
+        return ctype.get_pointee(), tok + '&'
     elif ctype.kind == clang.cindex.TypeKind.RVALUEREFERENCE:
-        return ctype.get_pointee(), "&&"
+        t, tok = get_underlying_type(ctype.get_pointee())
+        return ctype.get_pointee(), tok + "&&"
     elif ctype.kind == clang.cindex.TypeKind.CONSTANTARRAY:
         parts = list()
 
@@ -484,7 +512,9 @@ def get_underlying_type(ctype: clang.cindex.Type) -> Tuple[clang.cindex.Type, st
         for t in parts:
             token += f"[{t}]"
 
-        return ctype, token
+        ctype, tok = get_underlying_type(ctype)
+
+        return ctype, tok + token
 
     return ctype, ''
 
