@@ -28,8 +28,9 @@ colorama_init()
 
 
 FLAG_EXTRA_DECLS = "includerefs"
-FLAG_IMPORT_ALL = "importall"
-FLAG_ERROR_EXIT = "safe"
+FLAG_IMPORT_ALL  = "importall"
+FLAG_ERROR_EXIT  = "safe"
+FLAG_SYS_HEADER  = "sys"
 
 
 SEVERITY = {
@@ -160,7 +161,7 @@ class PXDGen:
                     for i in pxspace.import_strings(FLAG_IMPORT_ALL in self.flags):
                         imports.add(i)
 
-                for line in pxspace.lines(os.path.relpath(file, self.opts.relpath)):
+                for line in pxspace.lines(os.path.relpath(file, self.opts.relpath), FLAG_SYS_HEADER in self.flags):
                     body.writeline(line)
 
                 body.writeline('')

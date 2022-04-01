@@ -781,7 +781,7 @@ class Namespace:
 
         return result
 
-    def lines(self, rel_header_path: str) -> Generator[str, None, None]:
+    def lines(self, rel_header_path: str, system_header: bool) -> Generator[str, None, None]:
         """
         Generator over the lines of this namespace.
 
@@ -794,19 +794,21 @@ class Namespace:
         for line in block(
             children,
             name,
-            self.cython_header(rel_header_path),
+            self.cython_header(rel_header_path, system_header),
             False
         ):
             yield line
 
-    def cython_header(self, rel_header_path: str) -> str:
+    def cython_header(self, rel_header_path: str, system_header: bool) -> str:
         """
         The Cython header for this namespace.
 
         @param rel_header_path: Header path relative to the C compiler's include path.
         @return: The Cythonized header for this namespace.
         """
-        base = f"cdef extern from \"{rel_header_path.replace(os.path.sep, '/')}\""
+        header_name = rel_header_path.replace(os.path.sep, '/')
+        header_name = f"<{header_name}>" if system_header else header_name
+        base = f"cdef extern from \"{header_name}\""
         namespace = f" namespace \"{self.cpp_name}\":" if self.cpp_name else ':'
 
         return base + namespace
