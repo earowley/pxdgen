@@ -433,7 +433,7 @@ def full_type_repr(ctype: clang.cindex.Type, ref_cursor: clang.cindex.Cursor) ->
         return full_type_repr(ctype.get_pointee(), ref_cursor) + "&&"
     elif ctype.kind == clang.cindex.TypeKind.CONSTANTARRAY:
         return full_type_repr(ctype.get_array_element_type(), ref_cursor) + f"[{ctype.get_array_size()}]"
-    elif ctype.kind == clang.cindex.TypeKind.INCOMPLETEARRAY:
+    elif ctype.kind in (clang.cindex.TypeKind.INCOMPLETEARRAY, clang.cindex.TypeKind.VARIABLEARRAY):
         return full_type_repr(ctype.get_array_element_type(), ref_cursor) + "[]"
 
     nargs = ctype.get_num_template_arguments()

@@ -261,10 +261,7 @@ class CCursor:
         result = set()
 
         for child in cursor.get_children():
-            if child.kind in (
-                    clang.cindex.CursorKind.TYPE_REF,
-                    clang.cindex.CursorKind.TEMPLATE_REF
-            ):
+            if child.kind in TYPE_REFS:
                 cdef = child.get_definition()
                 if cdef is not None:
                     result.add(specialize(cdef))
@@ -878,10 +875,10 @@ class Namespace:
             for child in current.get_children():
                 stack.append(child)
 
-                if child.kind in (
-                        clang.cindex.CursorKind.TYPE_REF,
-                        clang.cindex.CursorKind.TEMPLATE_REF
-                ):
+                if (child.kind in TYPE_REFS or
+                        (current.kind == clang.cindex.CursorKind.TYPEDEF_DECL and
+                         child.kind in STRUCTURED_DATA_KINDS and
+                         child.spelling)):
                     decl = child.get_definition()
 
                     if decl is None:

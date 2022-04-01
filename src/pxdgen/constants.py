@@ -58,6 +58,10 @@ ANON_KINDS = STRUCTURED_DATA_KINDS + (
     kinds.ENUM_DECL,
     kinds.UNION_DECL
 )
+TYPE_REFS = (
+    kinds.TYPE_REF,
+    kinds.TEMPLATE_REF
+)
 IGNORED_IMPORTS = {
     "size_t",
     "std::size_t",
