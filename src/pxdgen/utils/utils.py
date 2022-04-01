@@ -335,7 +335,7 @@ def get_import_string(importer: clang.cindex.Cursor, importee: clang.cindex.Curs
     importee_space = containing_space(importee, lambda p: p.kind in SPACE_KINDS)
     addr = f"{importee_space}::{importee.spelling}".strip("::")
 
-    if addr in IGNORED_IMPORTS or not importee_space:
+    if addr in IGNORED_IMPORTS:
         return None
 
     importee_dot = containing_space(importee, lambda p: p.kind != clang.cindex.CursorKind.NAMESPACE).split("::")[1:]
@@ -349,12 +349,6 @@ def get_import_string(importer: clang.cindex.Cursor, importee: clang.cindex.Curs
             return None
         if importer_file.name == importee_file.name:
             return None
-
-        # ipath = os.path.basename(importee_file.name)
-        # i = ipath.rfind('.')
-        #
-        # if i != -1:
-        #     ipath = ipath[:i]
 
         return f"from {importee_home.replace('::', '.')} cimport {importee_dot[0]}"
 
