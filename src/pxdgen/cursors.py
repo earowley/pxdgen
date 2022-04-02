@@ -615,6 +615,10 @@ class Typedef(CCursor):
         """
         utt = self.cursor.underlying_typedef_type
 
+        if utt.spelling == "__builtin_va_list":
+            yield f"ctypedef void* {self.name}"
+            return
+
         if utils.is_function_pointer(utt):
             result = utils.convert_dialect(utils.full_type_repr(utt, self.cursor))
 
