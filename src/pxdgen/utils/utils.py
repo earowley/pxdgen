@@ -20,12 +20,13 @@ from typing import List, Dict, Tuple, Callable, Optional
 from ..constants import *
 
 
-def find_namespaces(cursor: clang.cindex.Cursor, valid_headers: set = None,
+def find_namespaces(cursor: clang.cindex.Cursor, valid_headers: set, recursive: bool,
                     **kwargs) -> Dict[str, List[clang.cindex.Cursor]]:
     """
     Finds namespaces, given the top-level cursor of a header file.
     @param cursor: Clang Cursor.
-    @param valid_headers: Header whitelist set for filtering
+    @param valid_headers: Header whitelist set for filtering.
+    @param recursive: Use all namespaces, rather than just the ones in valid_headers.
     @return: Dictionary in the following form:
     {
         "A::B::C": [clang.cindex.Cursor c1, clang.cindex.Cursor c2 ...],
@@ -49,13 +50,13 @@ def find_namespaces(cursor: clang.cindex.Cursor, valid_headers: set = None,
     for child in cursor.get_children():
         add_cond = all((
             child.kind == clang.cindex.CursorKind.NAMESPACE or is_cppclass(child),
-            valid_headers is None or os.path.abspath(child.location.file.name) in valid_headers
+            recursive or os.path.abspath(child.location.file.name) in valid_headers
         ))
         if add_cond:
             namespaces.append(child)
 
     for namespace in namespaces:
-        _update(ret, find_namespaces(namespace, valid_headers, curr_name=curr_name + "::" + namespace.spelling))
+        _update(ret, find_namespaces(namespace, valid_headers, recursive, curr_name=curr_name + "::" + namespace.spelling))
 
     if cursor.kind in SPACE_KINDS:
         _update(ret, {curr_name.strip("::"): [cursor]})
@@ -461,7 +462,10 @@ def resolve_typename_type(ctype: clang.cindex.Type, parts: List[str]) -> Optiona
     looking = 0
 
     while True:
-        name = parts[looking]
+        try:
+            name = parts[looking]
+        except IndexError:
+            return None
 
         for child in cur:
             if child.spelling == name:

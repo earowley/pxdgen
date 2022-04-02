@@ -140,7 +140,7 @@ class PXDGen:
                     if FLAG_ERROR_EXIT in self.flags:
                         exit()
 
-            namespaces = utils.find_namespaces(tu.cursor, valid_headers)
+            namespaces = utils.find_namespaces(tu.cursor, valid_headers, self.opts.recursive)
             namespaces[''] = [tu.cursor]
 
             for space_name, cursors in namespaces.items():
@@ -196,7 +196,8 @@ class PXDGen:
                     stream.write(body.getvalue())
                     stream.write('\n')
                 finally:
-                    stream.close()
+                    if stream is not sys.stdout:
+                        stream.close()
 
         if self.opts.output:
             for space_name in ctx:
