@@ -199,41 +199,35 @@ def walk_pointer(t: clang.cindex.Type) -> Tuple[int, clang.cindex.Type]:
 
 def is_function_pointer(ctype: clang.cindex.Type) -> bool:
     """
-    Returns whether the type represents a function pointer.
+    Returns whether the type represents a function pointer
+    or prototype.
 
     @param ctype: Any Clang Type object.
     @return: Boolean.
     """
-    if ctype.kind != clang.cindex.TypeKind.POINTER:
-        return False
-
-    _, result = walk_pointer(ctype)
-
-    return result.kind == clang.cindex.TypeKind.FUNCTIONPROTO
+    return walk_pointer(ctype)[1].kind == clang.cindex.TypeKind.FUNCTIONPROTO
 
 
 def get_function_pointer_return_type(ctype: clang.cindex.Type) -> clang.cindex.Type:
     """
-    Gets the return type of a function pointer. Type is not validated,
-    use is_function_pointer to validate.
+    Gets the return type of a function pointer or prototype.
+    Type is not validated, use is_function_pointer to validate.
 
     @param ctype: Clang Type object.
     @return: str.
     """
-    _, result = walk_pointer(ctype)
-    return result.get_result()
+    return walk_pointer(ctype)[1].get_result()
 
 
 def get_function_pointer_arg_types(ctype: clang.cindex.Type) -> List[clang.cindex.Type]:
     """
-    Gets the argument types of a function pointer. Type is not validated,
-    use is_function_pointer to validate.
+    Gets the argument types of a function pointer or prototype.
+    Type is not validated, use is_function_pointer to validate.
 
     @param ctype: Clang Type object.
     @return: list.
     """
-    _, result = walk_pointer(ctype)
-    return [arg for arg in result.argument_types()]
+    return [arg for arg in walk_pointer(ctype)[1].argument_types()]
 
 
 def is_function_variadic(cursor: clang.cindex.Cursor) -> bool:

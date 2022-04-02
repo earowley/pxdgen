@@ -547,7 +547,7 @@ class Union(CCursor):
         self._children = list()
 
         for child in cursor.get_children():
-            if child.kind == clang.cindex.CursorKind.FIELD_DECL or child.kind in ANON_KINDS:
+            if (child.kind == clang.cindex.CursorKind.FIELD_DECL and child.spelling) or child.kind in ANON_KINDS:
                 self._children.append(specialize(child))
 
     @property
@@ -616,14 +616,14 @@ class Typedef(CCursor):
         utt = self.cursor.underlying_typedef_type
 
         if utils.is_function_pointer(utt):
-            result = utils.get_function_pointer_return_type(utt)
-            args = utils.get_function_pointer_arg_types(utt)
-            ndim, _ = utils.walk_pointer(utt)
+            result = utils.convert_dialect(utils.full_type_repr(utt, self.cursor))
 
-            left = utils.convert_dialect(utils.full_type_repr(result, self.cursor))
-            right = ", ".join(utils.convert_dialect(utils.full_type_repr(arg, self.cursor)) for arg in args)
-
-            yield f"ctypedef {left} ({'*' * ndim}{self.name})({right.replace('(void)', '()')})"
+            # A function prototype can be typedefed but is not an lvalue reference
+            if utt.kind == clang.cindex.TypeKind.FUNCTIONPROTO:
+                yield "ctypedef " + result.replace("()", self.name, 1)
+            else:
+                i = result.index(')')
+                yield "ctypedef " + result[:i] + self.name + result[i:]
             return
 
         spelling = utils.convert_dialect(utils.full_type_repr(utt, self.cursor))
@@ -670,7 +670,8 @@ class Struct(CCursor):
             if (
                     child.access_specifier == clang.cindex.AccessSpecifier.PRIVATE or
                     child.kind not in Struct.INSTANCE_TYPES or
-                    utils.is_extra_decl(child)
+                    utils.is_extra_decl(child) or
+                    (child.kind not in ANON_KINDS and not child.spelling)
             ):
                 continue
             self._children.append(specialize(child))
