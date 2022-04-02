@@ -104,6 +104,9 @@ class PXDGen:
 
         @return: None.
         """
+        if self.opts.recursive and FLAG_EXTRA_DECLS in self.flags:
+            exit(f"Recursion (-r) and extra declarations (-f{FLAG_EXTRA_DECLS}) should not be enabled simultaneously")
+
         to_parse = list()
 
         if self.file_mode:
@@ -151,14 +154,17 @@ class PXDGen:
 
                 imports, fwd, body = set(), TabWriter(), TabWriter()
 
-                if FLAG_EXTRA_DECLS in self.flags:
+                #  Imports are disabled if extra declarations are defined
+                #  Extra declarations are disabled if recursive is enabled
+                #  Imports are also disabled if output is directed to a single file/stream
+                if FLAG_EXTRA_DECLS in self.flags and not self.opts.recursive:
                     fwd_decls = sorted(pxspace.forward_decls, key=lambda v: len(Namespace._get_all_assoc(v.cursor)))
 
                     if len(fwd_decls):
                         for line in block(fwd_decls, "toplevel", "cdef extern from *:", False):
                             fwd.writeline(line)
-                else:  # Imports are disabled if extra declarations are defined
-                    for i in pxspace.import_strings(FLAG_IMPORT_ALL in self.flags):
+                elif self.opts.output or not self.opts.recursive:
+                    for i in pxspace.import_strings(FLAG_IMPORT_ALL in self.flags or self.opts.recursive):
                         imports.add(i)
 
                 for line in pxspace.lines(os.path.relpath(file, self.opts.relpath), FLAG_SYS_HEADER in self.flags):

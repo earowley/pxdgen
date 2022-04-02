@@ -772,10 +772,9 @@ class Namespace:
         @return: Set of CCursors of type declarations that
         need to be defined.
         """
-        result = set()
+        assert not self.recursive, "Forward declarations should not be used when recursion is enabled"
 
-        if self.recursive:
-            return result
+        result = set()
 
         for child in self.children:
             for t in Namespace._get_all_assoc(child):
@@ -828,9 +827,6 @@ class Namespace:
         @return: A set of import strings.
         """
         result = set()
-
-        if self.recursive:
-            return result
 
         for child in self.children:
             for t in specialize(child).associated_types:
