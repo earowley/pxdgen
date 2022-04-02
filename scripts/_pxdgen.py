@@ -42,8 +42,9 @@ SEVERITY = {
 }
 
 
-def px_log(*args):
-    print(">   ", *args, file=sys.stderr)
+def px_log(*args, source: str ="PxdGen"):
+    source = f"[{source}]"
+    print(f"{source:.<15}", *args, sep='', file=sys.stderr)
 
 
 class PXDGen:
@@ -135,15 +136,15 @@ class PXDGen:
             tu = self.index.parse(file, self.clang_args)
 
             if self.opts.verbose:
-                px_log("Parsing", file)
+                px_log("Parsing ", file)
 
             for d in tu.diagnostics:
                 if d.severity == 0:
                     continue
                 if self.opts.verbose and d.severity < 3:
-                    px_log(f"{SEVERITY[d.severity]}: {d.spelling}")
+                    px_log(f"{SEVERITY[d.severity]}: {d.spelling}", source="Clang")
                 elif d.severity >= 3:
-                    px_log(f"{SEVERITY[d.severity]}: {d.spelling}")
+                    px_log(f"{SEVERITY[d.severity]}: {d.spelling}", source="Clang")
                     if FLAG_ERROR_EXIT in self.flags:
                         exit()
 
