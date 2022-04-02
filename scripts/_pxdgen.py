@@ -42,6 +42,10 @@ SEVERITY = {
 }
 
 
+def px_log(*args):
+    print(">   ", *args, file=sys.stderr)
+
+
 class PXDGen:
     def __init__(self, program_options: argparse.Namespace):
         """
@@ -119,11 +123,11 @@ class PXDGen:
         valid_headers = set(to_parse)
 
         if self.opts.verbose:
-            print(f"PxDGen in {'file mode' if self.file_mode else 'directory mode'} parsing the following header{'s' if len(valid_headers) > 1 else ''}:")
+            px_log(f"PxDGen in {'file mode' if self.file_mode else 'directory mode'} parsing the following header{'s' if len(valid_headers) > 1 else ''}:")
 
             for h in valid_headers:
-                print(h)
-            print()
+                px_log(h)
+            px_log()
 
         ctx = dict()
 
@@ -131,15 +135,15 @@ class PXDGen:
             tu = self.index.parse(file, self.clang_args)
 
             if self.opts.verbose:
-                print("Parsing", file)
+                px_log("Parsing", file)
 
             for d in tu.diagnostics:
                 if d.severity == 0:
                     continue
                 if self.opts.verbose and d.severity < 3:
-                    print(f"{SEVERITY[d.severity]}: {d.spelling}")
+                    px_log(f"{SEVERITY[d.severity]}: {d.spelling}")
                 elif d.severity >= 3:
-                    print(f"{SEVERITY[d.severity]}: {d.spelling}")
+                    px_log(f"{SEVERITY[d.severity]}: {d.spelling}")
                     if FLAG_ERROR_EXIT in self.flags:
                         exit()
 
