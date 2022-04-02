@@ -287,6 +287,21 @@ class DataType(CCursor):
         super().__init__(cursor)
 
     @property
+    def associated_types(self) -> Set[CCursor]:
+        """
+        Override from base class to support
+        function pointers.
+        """
+        result = super().associated_types
+
+        if self.is_function_pointer:
+            for child in self.cursor.get_children():
+                if child.kind == clang.cindex.CursorKind.PARM_DECL:
+                    result.update(DataType(child).associated_types)
+
+        return result
+
+    @property
     def is_function_pointer(self) -> bool:
         return utils.is_function_pointer(self.cursor.type)
 
@@ -328,19 +343,7 @@ class DataType(CCursor):
 
     @property
     def typename(self) -> str:
-        if self.is_function_pointer:
-            return self._function_ptr_typename
-
         return utils.full_type_repr(self.cursor.type, self.cursor)
-
-    @property
-    def _function_ptr_typename(self) -> str:
-        ndim, _ = utils.walk_pointer(self.cursor.type)
-        result = utils.get_function_pointer_return_type(self.cursor.type)
-        args = utils.get_function_pointer_arg_types(self.cursor.type)
-        ret = f"{utils.full_type_repr(result, self.cursor)} ({'*' * ndim})({','.join(utils.full_type_repr(arg, self.cursor) for arg in args)})"
-
-        return utils.convert_dialect(ret.replace("(void)", "()"))
 
     @property
     def _function_ptr_declaration(self) -> str:
@@ -349,12 +352,10 @@ class DataType(CCursor):
 
         @return: str.
         """
-        ndim, _ = utils.walk_pointer(self.cursor.type)
-        result = utils.get_function_pointer_return_type(self.cursor.type)
-        args = utils.get_function_pointer_arg_types(self.cursor.type)
-        ret = f"{utils.full_type_repr(result, self.cursor)} ({'*' * ndim}{self.name})({','.join(utils.full_type_repr(arg, self.cursor) for arg in args)})"
+        typename = self.typename
+        i = typename.index(')')
 
-        return utils.convert_dialect(ret.replace("(void)", "()"))
+        return utils.convert_dialect(typename[:i] + self.name + typename[i:])
 
     def lines(self, **kwargs) -> Generator[str, None, None]:
         """

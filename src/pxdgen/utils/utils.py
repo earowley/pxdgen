@@ -350,6 +350,8 @@ def get_import_string(importer: clang.cindex.Cursor, importee: clang.cindex.Curs
         if importer_file.name == importee_file.name:
             return None
 
+        importee_home = importee_home or os.path.splitext(os.path.basename(importee_file.name))[0]
+
         return f"from {importee_home.replace('::', '.')} cimport {importee_dot[0]}"
 
     return "from {} cimport {} as {}".format(
@@ -418,7 +420,12 @@ def full_type_repr(ctype: clang.cindex.Type, ref_cursor: clang.cindex.Cursor) ->
 
         return get_relative_type_name(ref_cursor, decl)
 
-    if ctype.kind == clang.cindex.TypeKind.POINTER:
+    if is_function_pointer(ctype):
+        ndim, _ = walk_pointer(ctype)
+        result  = get_function_pointer_return_type(ctype)
+        args    = get_function_pointer_arg_types(ctype)
+        return f"{full_type_repr(result, ref_cursor)} ({'*' * ndim})({', '.join(full_type_repr(a, ref_cursor) for a in args)})"
+    elif ctype.kind == clang.cindex.TypeKind.POINTER:
         ndim, ctype = walk_pointer(ctype)
         return full_type_repr(ctype, ref_cursor) + '*' * ndim
     elif ctype.kind == clang.cindex.TypeKind.LVALUEREFERENCE:

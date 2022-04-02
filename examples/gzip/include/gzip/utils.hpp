@@ -1,4 +1,5 @@
 #include <cstdlib>
+#include <stdint.h>
 
 namespace gzip {
 
