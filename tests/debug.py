@@ -6,10 +6,24 @@ import clang.cindex as cc
 
 
 def find(name, base=None):
-    base = base or tu.cursor
-    for child in base.get_children():
-        if child.spelling == name:
-            return child
+    parts = name.split('.')
+    current = (base or tu.cursor).get_children()
+    saved = list()
+    i = 0
+    while True:
+        for child in current:
+            if child.spelling == parts[i]:
+                i += 1
+                if i == len(parts):
+                    return child
+                saved.append(current)
+                current = child.get_children()
+                break
+        else:
+            if not len(saved):
+                return None
+            i -= 1
+            current = saved.pop()
 
 
 def dump(base, indent=0):
@@ -28,8 +42,15 @@ if not os.path.isfile(args[0]):
     exit(f"Invalid header file {args[0]}")
 
 index = cc.Index.create()
-tu    = index.parse(args[0] , ["-I", "/usr/lib/clang/13.0.1/include", "-I", os.path.dirname(args[0])])
+try:
+    tu = index.parse(args[0] , ["-I", "/usr/lib/clang/13.0.1/include", "-I", os.path.dirname(args[0])])
+except:
+    tu = index.parse(args[0] , ["-I", "/usr/lib/clang/13.0.1/include", "-I", os.path.dirname(args[0]), "-x", "c++"])
 
 for diag in tu.diagnostics:
     print(diag.spelling)
+
+sys.path.append("../src")
+from pxdgen.cursors import *
+from pxdgen.utils.utils import *
 

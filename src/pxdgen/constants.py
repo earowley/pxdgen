@@ -48,7 +48,7 @@ STRUCTURED_DATA_KINDS = (
     kinds.CLASS_DECL,
     kinds.CLASS_TEMPLATE
 )
-# Anything 100% represented by the DataType class
+# Anything 100% able to be represented by the DataType class
 BASIC_DATA_KINDS = (
     kinds.PARM_DECL,
     kinds.VAR_DECL,
@@ -61,6 +61,10 @@ ANON_KINDS = STRUCTURED_DATA_KINDS + (
 TYPE_REFS = (
     kinds.TYPE_REF,
     kinds.TEMPLATE_REF
+)
+TYPEDEF_KINDS = (
+    kinds.TYPEDEF_DECL,
+    kinds.TYPE_ALIAS_DECL
 )
 IGNORED_IMPORTS = {
     "size_t",

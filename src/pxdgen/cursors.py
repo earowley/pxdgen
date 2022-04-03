@@ -41,7 +41,7 @@ def specialize(cursor: clang.cindex.Cursor) -> CCursor:
         return Enumeration(cursor)
     elif cursor.kind == clang.cindex.CursorKind.UNION_DECL:
         return Union(cursor)
-    elif cursor.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
+    elif cursor.kind in TYPEDEF_KINDS:
         return Typedef(cursor)
     elif cursor.kind in STRUCTURED_DATA_KINDS:
         return Struct(cursor)
@@ -256,6 +256,23 @@ class CCursor:
         """
         return CCursor._base_assoc_types(self.cursor)
 
+    @property
+    def unsupported(self) -> bool:
+        """
+        Whether this declaration uses a C++ construct
+        unsupported by Cython.
+
+        @return: bool.
+        """
+        for child in self.cursor.get_children():
+            if child.kind in TYPE_REFS:
+                d = child.get_definition() or child.type.get_declaration()
+
+                if utils.is_alias_unsupported(d):
+                    return True
+
+        return utils.is_typename_unsupported(self.cursor.type)
+
     @staticmethod
     def _base_assoc_types(cursor: clang.cindex.Cursor) -> Set[CCursor]:
         result = set()
@@ -302,6 +319,16 @@ class DataType(CCursor):
         return result
 
     @property
+    def unsupported(self) -> bool:
+        if self.is_function_pointer:
+            for child in self.cursor.get_children():
+                if child.kind == clang.cindex.CursorKind.PARM_DECL:
+                    if DataType(child).unsupported:
+                        return True
+
+        return super().unsupported
+
+    @property
     def is_function_pointer(self) -> bool:
         return utils.is_function_pointer(self.cursor.type)
 
@@ -312,6 +339,9 @@ class DataType(CCursor):
 
         @return: Cython syntax str.
         """
+        if self.unsupported:
+            return f"#  {self.cursor.type.spelling} {self.name}"
+
         if self.is_function_pointer:
             return self._function_ptr_declaration
 
@@ -371,7 +401,7 @@ class Function(CCursor):
     CYTHON_UNSUPPORTED = {
         "operator&=",
         "operator|=",
-        "operator->"
+        "operator->",
     }
 
     def __init__(self, cursor: clang.cindex.Cursor):
@@ -410,6 +440,14 @@ class Function(CCursor):
         return result
 
     @property
+    def unsupported(self) -> bool:
+        return (
+            any(arg.unsupported for arg in self._args) or
+            utils.is_typename_unsupported(self.cursor.result_type) or
+            super().unsupported
+        )
+
+    @property
     def first_optional_arg_index(self) -> int:
         """
         Gets the first optional argument index for
@@ -435,18 +473,25 @@ class Function(CCursor):
         @param kwargs: No kwargs to specify.
         @return: Generator over lines.
         """
+        comment = (
+            self.unsupported or
+            self.cursor.spelling in Function.CYTHON_UNSUPPORTED or
+            self.cursor.spelling.startswith('operator""')
+        )
         n = self.first_optional_arg_index
-        restype = utils.full_type_repr(self.cursor.result_type, self.cursor)
-        restype = utils.convert_dialect(restype)
-        comment = "#  " if self.cursor.spelling in Function.CYTHON_UNSUPPORTED else ''
+        restype = utils.convert_dialect(utils.full_type_repr(self.cursor.result_type, self.cursor))
 
         for i in range(n, len(self._args) + 1):
-            yield comment + f"{restype} {self.name}{self._tmpl_params}({', '.join(self._argument_declarations(i))})"
+            args = self._argument_declarations(i)
+
+            yield ("#  " if comment else '') + f"{restype} {self.name}{self._tmpl_params}({', '.join(args)})"
 
     def _argument_declarations(self, nargs: int) -> Generator[str, None, None]:
         """
-        Yields the Cython argument declarations of this function.
+        Returns whether there was an error and the Cython argument
+        declarations of this function.
         """
+
         for mem in self._args[:nargs]:
             # `=*` syntax seems to only work for cdef functions defined in pyx files
             # suffix = "=*" if any(child.kind == clang.cindex.CursorKind.UNEXPOSED_EXPR for child in mem) else ''
@@ -479,7 +524,9 @@ class Constructor(Function):
             pass
 
         for i in range(n, len(self._args) + 1):
-            yield f"{restype}{spelling}{self._tmpl_params}({', '.join(self._argument_declarations(i))})"
+            args = self._argument_declarations(i)
+
+            yield ("#  " if self.unsupported else '') + f"{restype}{spelling}{self._tmpl_params}({', '.join(args)})"
 
 
 class Enumeration(CCursor):
@@ -606,6 +653,13 @@ class Typedef(CCursor):
         """
         return utils.get_underlying_type(self.cursor.underlying_typedef_type)[0]
 
+    @property
+    def unsupported(self) -> bool:
+        return (
+            utils.is_typename_unsupported(self.cursor.underlying_typedef_type) or
+            super().unsupported
+        )
+
     def lines(self, **kwargs) -> Generator[str, None, None]:
         """
         Cython lines for this typedef.
@@ -615,13 +669,16 @@ class Typedef(CCursor):
         """
         utt = self.cursor.underlying_typedef_type
 
-        if utt.spelling == "__builtin_va_list":
+        if "__builtin_va_list" in (self.name, utt.spelling):
             yield f"ctypedef void* {self.name}"
             return
+        if self.unsupported:
+            yield f"#  ctypedef {utt.spelling} {self.name}"
+            return
+
+        result = utils.convert_dialect(utils.full_type_repr(utt, self.cursor))
 
         if utils.is_function_pointer(utt):
-            result = utils.convert_dialect(utils.full_type_repr(utt, self.cursor))
-
             # A function prototype can be typedefed but is not an lvalue reference
             if utt.kind == clang.cindex.TypeKind.FUNCTIONPROTO:
                 yield "ctypedef " + result.replace("()", self.name, 1)
@@ -630,17 +687,16 @@ class Typedef(CCursor):
                 yield "ctypedef " + result[:i] + self.name + result[i:]
             return
 
-        spelling = utils.convert_dialect(utils.full_type_repr(utt, self.cursor))
         ut, token = utils.get_underlying_type(utt)
         utd = ut.get_declaration()
 
-        # If typedef of another type has not been handled from larger context
-        if utd.kind in ANON_KINDS and not spelling.strip():
+        # If typedef of another type has not been handled from higher level context
+        if utd.kind in ANON_KINDS and not result.strip():
             for line in specialize(utd).lines(name=self.name, typedef=True):
                 yield line
             return
 
-        yield f"ctypedef {spelling} {self.name}"
+        yield f"ctypedef {result} {self.name}"
 
 
 class Struct(CCursor):
@@ -651,6 +707,7 @@ class Struct(CCursor):
         clang.cindex.CursorKind.CXX_METHOD,
         clang.cindex.CursorKind.FUNCTION_TEMPLATE,
         clang.cindex.CursorKind.TYPEDEF_DECL,
+        clang.cindex.CursorKind.TYPE_ALIAS_DECL,
         clang.cindex.CursorKind.ENUM_DECL,
         clang.cindex.CursorKind.CLASS_DECL,
         clang.cindex.CursorKind.STRUCT_DECL,

@@ -94,14 +94,7 @@ def is_cppclass(cursor: clang.cindex.Cursor) -> bool:
     @param cursor: Clang Cursor.
     @return: Boolean.
     """
-    # There can be anonymous structs and enumerations as fields
-    ANON = (clang.cindex.CursorKind.STRUCT_DECL, clang.cindex.CursorKind.ENUM_DECL, clang.cindex.CursorKind.UNION_DECL)
-    # return cursor.kind != clang.cindex.CursorKind.STRUCT_DECL or any((mem.kind not in CTYPES for mem in cursor.get_children()))
-    if cursor.kind not in (
-        clang.cindex.CursorKind.CLASS_DECL,
-        clang.cindex.CursorKind.CLASS_TEMPLATE,
-        clang.cindex.CursorKind.STRUCT_DECL
-    ):
+    if cursor.kind not in STRUCTURED_DATA_KINDS:
         return False
     if cursor.kind in (
             clang.cindex.CursorKind.CLASS_DECL,
@@ -109,9 +102,13 @@ def is_cppclass(cursor: clang.cindex.Cursor) -> bool:
     ):
         return True
 
+    # There can be anonymous structs and enumerations as fields
     for child in cursor.get_children():
-        if child.kind not in ANON + (clang.cindex.CursorKind.FIELD_DECL,):
-            return True
+        if child.kind == clang.cindex.CursorKind.FIELD_DECL:
+            continue
+        if child.kind in ANON_KINDS and child.is_anonymous():
+            continue
+        return True
 
     return False
 
@@ -177,10 +174,41 @@ def is_anonymous(cursor: clang.cindex.Cursor) -> bool:
     @param cursor: Clang cursor.
     @return: bool.
     """
-    return (cursor.kind in ANON_KINDS and (
-               cursor.is_anonymous()
-         )
+    return cursor.kind in ANON_KINDS and cursor.is_anonymous()
+
+
+def is_typename_unsupported(t: clang.cindex.Type) -> bool:
+    """
+    Whether a type uses any typename references,
+    which are not supported by Cython.
+
+    @param t: Clang type.
+    @return: bool.
+    """
+    ut, _ = get_underlying_type(t)
+    return ut.spelling.startswith("typename ") or any(
+        is_typename_unsupported(ut.get_template_argument_type(i)) for i in range(ut.get_num_template_arguments())
     )
+
+
+def is_alias_unsupported(cursor: clang.cindex.Cursor) -> bool:
+    """
+    Determines whether a declaration is based on a
+    type that is defined using type aliasing not
+    supported by Cython.
+
+    @param cursor: Clang cursor.
+    @return: bool.
+    """
+    while cursor.kind in TYPEDEF_KINDS:
+        utt = cursor.underlying_typedef_type
+
+        if is_typename_unsupported(utt):
+            return True
+
+        cursor = utt.get_declaration()
+
+    return cursor.kind == clang.cindex.CursorKind.TYPE_ALIAS_TEMPLATE_DECL
 
 
 def walk_pointer(t: clang.cindex.Type) -> Tuple[int, clang.cindex.Type]:
@@ -261,7 +289,7 @@ def get_template_params(cursor: clang.cindex.Cursor) -> str:
     typenames = list()
 
     for c in cursor.get_children():
-        if c.kind in TEMPLATE_KINDS:
+        if c.kind in TEMPLATE_KINDS and c.spelling:
             typenames.append(c.spelling)
 
     if not len(typenames):
@@ -278,7 +306,7 @@ def get_template_params_as_list(cursor: clang.cindex.Cursor) -> List[str]:
     @param cursor: Any Cursor.
     @return: A Python list like ['T', 'U'].
     """
-    return [c.spelling for c in cursor.get_children() if c.kind in TEMPLATE_KINDS]
+    return [c.spelling for c in cursor.get_children() if c.kind in TEMPLATE_KINDS and c.spelling]
 
 
 def get_relative_type_name(importer: clang.cindex.Cursor, importee: clang.cindex.Cursor) -> str:
@@ -389,28 +417,6 @@ def full_type_repr(ctype: clang.cindex.Type, ref_cursor: clang.cindex.Cursor) ->
         decl = subtype.get_declaration()
 
         if decl.kind == clang.cindex.CursorKind.NO_DECL_FOUND:
-            if subtype.spelling.startswith("typename "):
-                parts = subtype.spelling[subtype.spelling.index(' ')+1:].split("::")
-                tmpl_removed = list()
-
-                for name in parts:
-                    j = name.find('<')
-
-                    if j != -1:
-                        tmpl_removed.append(name[:j])
-                    else:
-                        tmpl_removed.append(name)
-
-                cur = resolve_typename_type(subtype, tmpl_removed)
-
-                if cur is None:
-                    return subtype.spelling
-
-                j = tmpl_removed.index(cur.spelling)
-                corrected = get_relative_type_name(ref_cursor, cur)
-
-                return f"{parts[j].replace(cur.spelling, corrected)}.{'.'.join(parts[j+1:])}"
-
             return subtype.spelling
 
         return get_relative_type_name(ref_cursor, decl)
@@ -494,10 +500,13 @@ def get_underlying_type(ctype: clang.cindex.Type) -> Tuple[clang.cindex.Type, st
         return t, tok + ('*' * ndim)
     elif ctype.kind == clang.cindex.TypeKind.LVALUEREFERENCE:
         t, tok = get_underlying_type(ctype.get_pointee())
-        return ctype.get_pointee(), tok + '&'
+        return t, tok + '&'
     elif ctype.kind == clang.cindex.TypeKind.RVALUEREFERENCE:
         t, tok = get_underlying_type(ctype.get_pointee())
-        return ctype.get_pointee(), tok + "&&"
+        return t, tok + "&&"
+    elif ctype.kind in (clang.cindex.TypeKind.INCOMPLETEARRAY, clang.cindex.TypeKind.VARIABLEARRAY):
+        t, tok = get_underlying_type(ctype.get_array_element_type())
+        return t, tok + "[]"
     elif ctype.kind == clang.cindex.TypeKind.CONSTANTARRAY:
         parts = list()
 
