@@ -450,7 +450,12 @@ def full_type_repr(ctype: clang.cindex.Type, ref_cursor: clang.cindex.Cursor) ->
     params = list()
 
     for i in range(nargs):
-        params.append(full_type_repr(ctype.get_template_argument_type(i), ref_cursor))
+        tmpl_param = ctype.get_template_argument_type(i)
+
+        if not tmpl_param.spelling:
+            params.append("void")
+        else:
+            params.append(full_type_repr(tmpl_param, ref_cursor))
 
     return f"{finalize(ctype)}<{', '.join(params)}>"
 

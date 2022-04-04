@@ -887,6 +887,10 @@ class Namespace:
 
         for child in self.children:
             for t in specialize(child).associated_types:
+
+                if t.cursor.kind in TEMPLATE_KINDS:
+                    continue
+
                 if t.file not in self.valid_headers:
                     # Handle if import should be done via libc/libcpp
                     stdpath = STD_IMPORTS.get(t.address, None)
