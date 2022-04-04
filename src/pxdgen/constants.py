@@ -14,11 +14,13 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import re
 import clang.cindex
 
 kinds = clang.cindex.CursorKind
 TAB_LENGTH = 4
 TAB = ' ' * TAB_LENGTH
+RE_DECLTYPE = re.compile("decltype\(.+\)")
 
 SPACE_KINDS = (
     kinds.STRUCT_DECL,

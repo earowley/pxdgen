@@ -151,10 +151,14 @@ def block(children: List[CCursor], name: str, header: str, restrict: bool) -> Ge
             if found:
                 continue
 
-        for line in child.lines():
+        for i, line in enumerate(child.lines()):
+            commented = line.strip().startswith('#')
             if restrict and isinstance(child, Function) and child.is_static_method:
-                yield TAB + "@staticmethod"
+                yield TAB + ("#  " if commented else '') + "@staticmethod"
             yield TAB + line
+
+        if i == 0 and commented:
+            count -= 1
 
     if not count:
         yield TAB + "pass"
@@ -399,9 +403,15 @@ class DataType(CCursor):
 
 class Function(CCursor):
     CYTHON_UNSUPPORTED = {
+        "operator+=",
+        "operator-=",
+        "operator^=",
         "operator&=",
         "operator|=",
         "operator->",
+        # Python name collisions
+        "is",
+        "global",
     }
 
     def __init__(self, cursor: clang.cindex.Cursor):

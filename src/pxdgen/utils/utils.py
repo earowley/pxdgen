@@ -14,6 +14,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import re
 import os.path
 import clang.cindex
 from typing import List, Dict, Tuple, Callable, Optional
@@ -186,7 +187,7 @@ def is_typename_unsupported(t: clang.cindex.Type) -> bool:
     @return: bool.
     """
     ut, _ = get_underlying_type(t)
-    return ut.spelling.startswith("typename ") or any(
+    return ut.spelling.startswith("typename ") or re.match(RE_DECLTYPE, ut.spelling) or any(
         is_typename_unsupported(ut.get_template_argument_type(i)) for i in range(ut.get_num_template_arguments())
     )
 
@@ -474,7 +475,7 @@ def full_type_repr(ctype: clang.cindex.Type, ref_cursor: clang.cindex.Cursor) ->
         else:
             params.append(full_type_repr(tmpl_param, ref_cursor))
 
-    return f"{finalize(ctype)}<{', '.join(params)}>"
+    return f"{finalize(ctype)}<{', '.join(p.strip('*').strip('&') for p in params)}>"
 
 
 def resolve_typename_type(ctype: clang.cindex.Type, parts: List[str]) -> Optional[clang.cindex.Cursor]:
