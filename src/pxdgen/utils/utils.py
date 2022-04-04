@@ -345,12 +345,16 @@ def get_relative_type_name(importer: clang.cindex.Cursor, importee: clang.cindex
         )
 
 
-def get_import_string(importer: clang.cindex.Cursor, importee: clang.cindex.Cursor) -> Optional[str]:
+def get_import_string(importer: clang.cindex.Cursor, importee: clang.cindex.Cursor, import_same_space: bool, default: Optional[str]) -> Optional[str]:
     """
     Calculates an import string given two reference cursors.
 
     @param importer: The reference type declaration.
     @param importee: The imported type declaration.
+    @param import_same_space: Whether types from the
+    @param default: If provided, it serves as an override
+    for imports which have no namespace to import from.
+    same namespace should be imported (from separate file).
     @return: The import string following Cython syntax.
     """
     importer_home = containing_space(importer, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE)
@@ -365,6 +369,9 @@ def get_import_string(importer: clang.cindex.Cursor, importee: clang.cindex.Curs
     importee_dot.append(importee.spelling)
 
     if importer_home == importee_home:
+        if not import_same_space:
+            return None
+
         importer_file = importer.location.file
         importee_file = importee.location.file
 
@@ -376,6 +383,16 @@ def get_import_string(importer: clang.cindex.Cursor, importee: clang.cindex.Curs
         importee_home = importee_home or os.path.splitext(os.path.basename(importee_file.name))[0]
 
         return f"from {importee_home.replace('::', '.')} cimport {importee_dot[0]}"
+
+    if not importee_home:
+        importee_file = importee.location.file
+
+        if importee_file is None:
+            return None
+
+        importee_home = default or os.path.splitext(os.path.basename(importee_file.name))[0]
+
+        return f"from {importee_home} cimport {importee_dot[0]}"
 
     return "from {} cimport {} as {}".format(
         importee_home.replace('::', '.'),

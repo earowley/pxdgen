@@ -902,7 +902,8 @@ class Namespace:
                     if not include_all:
                         continue
 
-                res = utils.get_import_string(child, t.cursor)
+                default = os.path.splitext(os.path.basename(self.main_header))[0] if self.recursive else None
+                res = utils.get_import_string(child, t.cursor, not self.recursive, default)
 
                 if res is not None:
                     result.add(res)
