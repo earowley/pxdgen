@@ -21,6 +21,7 @@ kinds = clang.cindex.CursorKind
 TAB_LENGTH = 4
 TAB = ' ' * TAB_LENGTH
 RE_DECLTYPE = re.compile("decltype\(.+\)")
+RE_CPP_INCLUDE = re.compile(" *#include *[<\"].+\.h(pp){0,1}[>\"] *")
 
 SPACE_KINDS = (
     kinds.STRUCT_DECL,

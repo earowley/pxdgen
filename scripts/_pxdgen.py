@@ -47,7 +47,7 @@ def px_log(*args, source: str ="PxdGen"):
     print(f"{source:.<15}", *args, sep='', file=sys.stderr)
 
 
-class PXDGen:
+class PxdGen:
     def __init__(self, program_options: argparse.Namespace):
         """
         Main class for PxdGen supplementary script. CLI implementation.
@@ -62,7 +62,7 @@ class PXDGen:
             exit(f"Unable to find input '{program_options.header}' on the file system")
 
         if not os.path.isdir(relpath):
-            exit(f"Unable to find working directory {relpath}")
+            exit(f"Unable to find relative path '{relpath}'")
 
         if dir_mode and not program_options.output:
             request = input("Detected directory without an output location, are you sure you want to print the results to stdout? [y/n]")
@@ -82,7 +82,7 @@ class PXDGen:
             msg = str(e)
 
             if "set_library_path" in msg:
-                exit("Unable to find libclang.so. Specify the path to pxdgen with -L")
+                exit("Unable to find libclang.so. Specify the path to PxdGen with `-L`")
 
             exit(msg)
 
@@ -117,9 +117,9 @@ class PXDGen:
         if self.file_mode:
             to_parse.append(os.path.abspath(self.opts.header))
         elif self.dir_mode:
-            for header in ("**/*.h", "**/*.hpp"):
-                for gt in glob.glob(os.path.join(self.opts.header, header), recursive=True):
-                    to_parse.append(os.path.abspath(gt))
+            for glob_term in ("**/*.h", "**/*.hpp"):
+                for header in glob.glob(os.path.join(self.opts.header, glob_term), recursive=True):
+                    to_parse.append(os.path.abspath(header))
 
         valid_headers = set(to_parse)
 
@@ -254,5 +254,5 @@ def main():
                       help="Set a flag to further tune the program output")
 
     opts = argp.parse_args(args)
-    proc = PXDGen(opts)
+    proc = PxdGen(opts)
     proc.run()
