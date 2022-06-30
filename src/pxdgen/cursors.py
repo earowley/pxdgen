@@ -962,7 +962,7 @@ class Namespace:
 
                     spec = specialize(decl)
 
-                    # Check to avoid parsing the same type multiple times..
+                    # Check to avoid parsing the same type multiple times.
                     # Greatly reduces the time required
                     if spec not in result:
                         stack.append(decl)

@@ -1,2 +1,3 @@
 clang
 colorama
+cython
