@@ -17,11 +17,14 @@ def foo():
 """
 
 
-def cythonize(base: str, imports: List[str]) -> Tuple[int, str]:
+def cythonize(base: str, imports: List[str], use_cpp: bool = False) -> Tuple[int, str]:
     save = getcwd()
     imports = '\n'.join(f"from {i} cimport *" for i in imports)
     cython = TEST_CODE.format(imports)
     chdir(join('.', "output", base))
+
+    if use_cpp:
+        cython = "# distutils: language = c++\n\n" + cython
 
     try:
         with open("test.pyx", 'w') as file:
@@ -57,7 +60,7 @@ class TestHeaders(unittest.TestCase):
         self.opts.output = "./output/cplusplus"
         self.opts.language = "c++"
         PxdGen(self.opts).run()
-        rc, out = cythonize("cplusplus", ["Foo", "Bar", "Bar.Baz"])
+        rc, out = cythonize("cplusplus", ["Foo", "Bar", "Bar.Baz"], True)
         print(out)
         self.assertEqual(0, rc)
 

@@ -3,6 +3,7 @@
 import os
 import sys
 import clang.cindex as cc
+from configparser import ConfigParser
 
 
 def find(name, base=None):
@@ -41,16 +42,27 @@ if not len(args):
 if not os.path.isfile(args[0]):
     exit(f"Invalid header file {args[0]}")
 
+cfg = ConfigParser()
 index = cc.Index.create()
+cfg.read("configuration.ini")
+include_args = ["-I", os.path.dirname(args[0])]
+extra = cfg["Clang"]["include"]
+
+if extra:
+    include_args.extend(["-I", extra])
+
 try:
-    tu = index.parse(args[0] , ["-I", "/usr/lib/clang/13.0.1/include", "-I", os.path.dirname(args[0])])
+    tu = index.parse(args[0], include_args)
 except:
-    tu = index.parse(args[0] , ["-I", "/usr/lib/clang/13.0.1/include", "-I", os.path.dirname(args[0]), "-x", "c++"])
+    tu = index.parse(args[0], include_args + ["-x", "c++"])
 
 for diag in tu.diagnostics:
     print(diag.spelling)
 
+cur = tu.cursor
+
 sys.path.append("../src")
 from pxdgen.cursors import *
 from pxdgen.utils.utils import *
-
+from pxdgen.extensions import load_extensions
+load_extensions()

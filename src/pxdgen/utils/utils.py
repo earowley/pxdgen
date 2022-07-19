@@ -318,8 +318,8 @@ def get_relative_type_name(importer: clang.cindex.Cursor, importee: clang.cindex
     @param importee: The imported type declaration.
     @return: The string following Cython syntax.
     """
-    importer_space = containing_space(importer, lambda p: p.kind in SPACE_KINDS)
-    importee_space = containing_space(importee, lambda p: p.kind in SPACE_KINDS)
+    importer_space = containing_space(importer, lambda p: p.kind in SPACE_KINDS and not p.is_inline_namespace())
+    importee_space = containing_space(importee, lambda p: p.kind in SPACE_KINDS and not p.is_inline_namespace())
     addr = f"{importee_space}::{importee.spelling}".strip("::")
 
     if importer_space == importee_space or addr in IGNORED_IMPORTS:
@@ -329,8 +329,8 @@ def get_relative_type_name(importer: clang.cindex.Cursor, importee: clang.cindex
     if not importee_space:
         return importee.spelling
 
-    importer_home = containing_space(importer, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE)
-    importee_home = containing_space(importee, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE)
+    importer_home = containing_space(importer, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE and not p.is_inline_namespace())
+    importee_home = containing_space(importee, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE and not p.is_inline_namespace())
     importee_dot = containing_space(importee, lambda p: p.kind != clang.cindex.CursorKind.NAMESPACE).split("::")[1:]
     importee_dot.append(importee.spelling)
 
@@ -358,9 +358,9 @@ def get_import_string(importer: clang.cindex.Cursor, importee: clang.cindex.Curs
     same namespace should be imported (from separate file).
     @return: The import string following Cython syntax.
     """
-    importer_home = containing_space(importer, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE)
-    importee_home = containing_space(importee, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE)
-    importee_space = containing_space(importee, lambda p: p.kind in SPACE_KINDS)
+    importer_home = containing_space(importer, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE and not p.is_inline_namespace())
+    importee_home = containing_space(importee, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE and not p.is_inline_namespace())
+    importee_space = containing_space(importee, lambda p: p.kind in SPACE_KINDS and not p.is_inline_namespace())
     addr = f"{importee_space}::{importee.spelling}".strip("::")
 
     if addr in IGNORED_IMPORTS:

@@ -237,11 +237,11 @@ class CCursor:
 
     @property
     def home(self) -> str:
-        return utils.containing_space(self.cursor, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE)
+        return utils.containing_space(self.cursor, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE and not p.is_inline_namespace())
 
     @property
     def namespace(self) -> str:
-        return utils.containing_space(self.cursor, lambda p: p.kind in SPACE_KINDS)
+        return utils.containing_space(self.cursor, lambda p: p.kind in SPACE_KINDS and not p.is_inline_namespace())
 
     @property
     def address(self) -> str:

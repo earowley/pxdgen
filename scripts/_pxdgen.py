@@ -23,6 +23,7 @@ import clang.cindex
 import pxdgen.utils as utils
 from pxdgen.utils import TabWriter
 from pxdgen.cursors import Namespace, block
+from pxdgen.extensions import load_extensions
 from colorama import Fore, Style, init as colorama_init
 colorama_init()
 
@@ -102,6 +103,8 @@ class PxdGen:
         self.file_mode = file_mode
         self.relpath = relpath
         self.flags = set(program_options.flags)
+
+        load_extensions()
 
     def run(self):
         """
