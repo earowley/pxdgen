@@ -45,6 +45,8 @@ def specialize(cursor: clang.cindex.Cursor) -> CCursor:
         return Typedef(cursor)
     elif cursor.kind in STRUCTURED_DATA_KINDS:
         return Struct(cursor)
+    elif cursor.kind == clang.cindex.CursorKind.MACRO_DEFINITION:
+        return Macro(cursor)
     else:
         return CCursor(cursor)
 
@@ -399,6 +401,25 @@ class DataType(CCursor):
         @return: Generator of lines.
         """
         yield self.declaration
+
+
+class Macro(CCursor):
+    def __init__(self, cursor):
+        super().__init__(cursor)
+
+    def lines(self, **kwargs) -> Generator[str, None, None]:
+        macro_type = "const int"
+        tokens = [t.spelling for t in self.cursor.get_tokens()]
+        func = self.cursor.is_macro_function()
+        i = 1 if not func else (tokens.index(')') + 1)
+        macro_def = ''.join(tokens[i:])
+
+        if re.fullmatch(RE_CPP_INT, macro_def):
+            macro_type = "const long"
+        elif re.fullmatch(RE_CPP_FLOAT, macro_def):
+            macro_type = "const double"
+
+        yield f"{macro_type} {tokens[0]}{'(...)' if func else ''}"
 
 
 class Function(CCursor):
@@ -858,6 +879,7 @@ class Namespace:
         Generator over the lines of this namespace.
 
         @param rel_header_path: The relative header path to the header where this namespace is defined.
+        @param system_header: Whether angled brackets should be added to the header name.
         @return: Generator[str]
         """
         children = [specialize(c) for c in self.children]

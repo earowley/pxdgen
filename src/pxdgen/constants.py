@@ -22,6 +22,8 @@ TAB_LENGTH = 4
 TAB = ' ' * TAB_LENGTH
 RE_DECLTYPE = re.compile("decltype\(.+\)")
 RE_CPP_INCLUDE = re.compile(" *#include *[<\"].+\.h(pp)?[>\"] *")
+RE_CPP_INT = re.compile("\d{1,20}")
+RE_CPP_FLOAT = re.compile("\d+(\.\d+)?[fF]?")
 
 SPACE_KINDS = (
     kinds.STRUCT_DECL,

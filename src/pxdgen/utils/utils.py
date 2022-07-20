@@ -14,7 +14,6 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import re
 import os.path
 import clang.cindex
 from typing import List, Dict, Tuple, Callable, Optional
@@ -49,6 +48,8 @@ def find_namespaces(cursor: clang.cindex.Cursor, valid_headers: set, recursive: 
     curr_name = kwargs.get("curr_name", '')
 
     for child in cursor.get_children():
+        if child.location.file is None:
+            continue
         add_cond = all((
             child.kind == clang.cindex.CursorKind.NAMESPACE or is_cppclass(child),
             recursive or os.path.abspath(child.location.file.name) in valid_headers
@@ -441,8 +442,8 @@ def full_type_repr(ctype: clang.cindex.Type, ref_cursor: clang.cindex.Cursor) ->
 
     if is_function_pointer(ctype):
         ndim, _ = walk_pointer(ctype)
-        result  = get_function_pointer_return_type(ctype)
-        args    = get_function_pointer_arg_types(ctype)
+        result = get_function_pointer_return_type(ctype)
+        args = get_function_pointer_arg_types(ctype)
         return f"{full_type_repr(result, ref_cursor)} ({'*' * ndim})({', '.join(full_type_repr(a, ref_cursor) for a in args)})"
     elif ctype.kind == clang.cindex.TypeKind.POINTER:
         ndim, ctype = walk_pointer(ctype)

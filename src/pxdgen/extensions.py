@@ -20,20 +20,24 @@ import clang.cindex
 from ctypes import c_bool
 
 
-CURSOR_EXTENSIONS = [
-    # First three use bindings format, next three are for extending
-    ("clang_Cursor_isInlineNamespace", [clang.cindex.Cursor], c_bool,
-     True, clang.cindex.Cursor, "is_inline_namespace")
-]
+C = clang.cindex.conf.lib
+
+
+def is_inline_namespace(self) -> bool:
+    return C.clang_Cursor_isInlineNamespace(self)
+
+
+def is_macro_function(self) -> bool:
+    return C.clang_Cursor_isMacroFunctionLike(self)
 
 
 def load_extensions():
-    for ex in CURSOR_EXTENSIONS:
-        name, argtypes, restype, extend, etype, method = ex
-        c_func = getattr(clang.cindex.conf.lib, name)
-        c_func.argtypes = argtypes
-        c_func.restype = restype
+    f = C.clang_Cursor_isInlineNamespace
+    f.argtypes = [clang.cindex.Cursor]
+    f.restype = c_bool
+    setattr(clang.cindex.Cursor, "is_inline_namespace", is_inline_namespace)
 
-        # Optionally extend a type
-        if extend:
-            setattr(etype, method, lambda self, *args: c_func(self, *args))
+    f = C.clang_Cursor_isMacroFunctionLike
+    f.argtypes = [clang.cindex.Cursor]
+    f.restype = c_bool
+    setattr(clang.cindex.Cursor, "is_macro_function", is_macro_function)

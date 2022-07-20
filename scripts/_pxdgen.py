@@ -29,9 +29,10 @@ colorama_init()
 
 
 FLAG_EXTRA_DECLS = "includerefs"
-FLAG_IMPORT_ALL  = "importall"
-FLAG_ERROR_EXIT  = "safe"
-FLAG_SYS_HEADER  = "sys"
+FLAG_IMPORT_ALL = "importall"
+FLAG_ERROR_EXIT = "safe"
+FLAG_SYS_HEADER = "sys"
+FLAG_PARSE_DEFINES = "defines"
 
 
 SEVERITY = {
@@ -43,7 +44,7 @@ SEVERITY = {
 }
 
 
-def px_log(*args, source: str ="PxdGen"):
+def px_log(*args, source: str = "PxdGen"):
     source = f"[{source}]"
     print(f"{source:.<15}", *args, sep='', file=sys.stderr)
 
@@ -134,9 +135,10 @@ class PxdGen:
             px_log()
 
         ctx = dict()
+        parse_opts = clang.cindex.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD if FLAG_PARSE_DEFINES in self.flags else 0
 
         for file in to_parse:
-            tu = self.index.parse(file, self.clang_args)
+            tu = self.index.parse(file, self.clang_args, options=parse_opts)
 
             if self.opts.verbose:
                 px_log("Parsing ", file)

@@ -2,6 +2,7 @@
 
 import os
 import sys
+
 import clang.cindex as cc
 from configparser import ConfigParser
 
@@ -52,9 +53,9 @@ if extra:
     include_args.extend(["-I", extra])
 
 try:
-    tu = index.parse(args[0], include_args)
+    tu = index.parse(args[0], include_args, options=cc.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD)
 except:
-    tu = index.parse(args[0], include_args + ["-x", "c++"])
+    tu = index.parse(args[0], include_args + ["-x", "c++"], options=cc.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD)
 
 for diag in tu.diagnostics:
     print(diag.spelling)

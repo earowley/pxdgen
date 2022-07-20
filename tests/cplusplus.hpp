@@ -1,6 +1,10 @@
 #include <string>
 #include <vector>
 
+#define CPP_FOO 5
+#define CPP_BAR 5.0F
+#define CPP_FUNC(x) other_func(x, 5)
+
 namespace Foo {
     template <typename T>
     class A {
