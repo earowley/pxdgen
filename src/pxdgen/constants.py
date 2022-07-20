@@ -73,8 +73,10 @@ TYPEDEF_KINDS = (
 )
 IGNORED_IMPORTS = {
     "size_t",
-    "std::size_t",
     "ptrdiff_t"
+}
+REPLACED_IMPORTS = {
+    "std::size_t": "size_t"
 }
 STD_IMPORTS = {
     "int8_t": "libc.stdint",

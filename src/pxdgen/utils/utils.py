@@ -325,6 +325,8 @@ def get_relative_type_name(importer: clang.cindex.Cursor, importee: clang.cindex
 
     if importer_space == importee_space or addr in IGNORED_IMPORTS:
         return importee.spelling
+    if addr in REPLACED_IMPORTS:
+        return REPLACED_IMPORTS[addr]
     if addr in STD_IMPORTS:
         return addr.replace("::", '_')
     if not importee_space:
@@ -436,7 +438,8 @@ def full_type_repr(ctype: clang.cindex.Type, ref_cursor: clang.cindex.Cursor) ->
         decl = subtype.get_declaration()
 
         if decl.kind == clang.cindex.CursorKind.NO_DECL_FOUND:
-            return subtype.spelling
+            rep = REPLACED_IMPORTS.get(subtype.spelling)
+            return subtype.spelling if rep is None else rep
 
         return get_relative_type_name(ref_cursor, decl)
 

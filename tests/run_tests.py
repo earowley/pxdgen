@@ -59,8 +59,31 @@ class TestHeaders(unittest.TestCase):
         self.opts.header = "./cplusplus.hpp"
         self.opts.output = "./output/cplusplus"
         self.opts.language = "c++"
+        self.opts.flags.append("defines")
         PxdGen(self.opts).run()
         rc, out = cythonize("cplusplus", ["Foo", "Bar", "Bar.Baz"], True)
+        print(out)
+        self.assertEqual(0, rc)
+
+    def test_gzip(self):
+        self.opts.relpath = "./gzip/include"
+        self.opts.include.append("./gzip/include")
+        self.opts.header = "./gzip/include/gzip"
+        self.opts.output = "./output/gzip"
+        self.opts.language = "c++"
+        PxdGen(self.opts).run()
+        rc, out = cythonize("gzip", ["gzip"], True)
+        print(out)
+        self.assertEqual(0, rc)
+
+    def test_cxml(self):
+        self.opts.relpath = "./cxml"
+        self.opts.include.append("./cxml")
+        self.opts.header = "./cxml/cxml/cxml.h"
+        self.opts.output = "./output/cxml"
+        self.opts.recursive = True
+        PxdGen(self.opts).run()
+        rc, out = cythonize("cxml", ["cxml"])
         print(out)
         self.assertEqual(0, rc)
 

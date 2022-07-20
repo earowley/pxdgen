@@ -45,8 +45,8 @@ if not os.path.isfile(args[0]):
 
 cfg = ConfigParser()
 index = cc.Index.create()
-cfg.read("configuration.ini")
-include_args = ["-I", os.path.dirname(args[0])]
+cfg.read(os.path.join(os.path.dirname(__file__), "configuration.ini"))
+include_args = ["-I", os.path.dirname(args[0]), "-I", '.']
 extra = cfg["Clang"]["include"]
 
 if extra:
@@ -62,7 +62,7 @@ for diag in tu.diagnostics:
 
 cur = tu.cursor
 
-sys.path.append("../src")
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 from pxdgen.cursors import *
 from pxdgen.utils.utils import *
 from pxdgen.extensions import load_extensions
