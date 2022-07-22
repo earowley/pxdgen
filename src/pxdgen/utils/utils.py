@@ -388,7 +388,7 @@ def get_relative_type_name(importer: clang.cindex.Cursor, importee: clang.cindex
     # In the pxd output, this resolves to a specific file
     importer_namespace = get_cursor_namespace(importer)
     importee_namespace = get_cursor_namespace(importee)
-    importee_dot = get_cursor_local_access(importee)
+    importee_dot = get_cursor_local_access(importee).split("::")[1:]
     importee_dot.append(importee.spelling)
 
     # If in the same namespace, we have to access directly or by the containing class
@@ -424,10 +424,10 @@ def get_import_string(importer: clang.cindex.Cursor, importee: clang.cindex.Curs
     importee_addr = f"{importee_location}::{importee.spelling}".strip("::")
 
     # Ignored imports are builtin
-    if importee_addr in IGNORED_IMPORTS:
+    if importee_addr in IGNORED_IMPORTS or importee_addr in REPLACED_IMPORTS:
         return None
 
-    importee_dot = get_cursor_local_access(importee)
+    importee_dot = get_cursor_local_access(importee).split("::")[1:]
     importee_dot.append(importee.spelling)
 
     # If in the same file, no import required

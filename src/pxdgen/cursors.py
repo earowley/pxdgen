@@ -838,8 +838,7 @@ class Namespace:
         @param cursors: A list of cursors associated with this namespace.
         @param recursive: Whether this namespace should declare children from other headers, recursively.
         @param main_header: The header file to accept declarations from.
-        @param valid_headers: A set of valid headers from which children can be declared.
-                              useful for trimming if recursive is True.
+        @param valid_headers: The set of headers being parsed.
         """
         self.cursors = [CCursor(c) for c in cursors]
         self.cpp_name = self.cursors[0].address if cursors[0].kind in SPACE_KINDS else ''
@@ -876,9 +875,11 @@ class Namespace:
 
         for child in self.children:
             for t in Namespace._get_all_assoc(child):
+                addr = t.address
                 if (
-                    t.file not in self.valid_headers and
-                    t.address not in IGNORED_IMPORTS
+                    t.file != self.main_header and
+                    addr not in IGNORED_IMPORTS and
+                    addr not in REPLACED_IMPORTS
                 ):
                     result.add(t)
 
@@ -936,7 +937,7 @@ class Namespace:
 
                 if t.file not in self.valid_headers:
                     # Handle if import should be done via libc/libcpp
-                    stdpath = STD_IMPORTS.get(t.address, None)
+                    stdpath = STD_IMPORTS.get(t.address)
 
                     if stdpath is not None:
                         result.add(f"from {stdpath} cimport {t.name} as {t.address.replace('::', '_')}")

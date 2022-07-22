@@ -93,6 +93,13 @@ class TestHeaders(unittest.TestCase):
         self.opts.output = "./output/openssl/openssl"
         PxdGen(self.opts).run()
 
+        self.opts.header = "./openssl/internal"
+        self.opts.output = "./output/openssl/internal"
+        PxdGen(self.opts).run()
+
+        self.opts.header = "./openssl/crypto"
+        self.opts.output = "./output/openssl/crypto"
+        PxdGen(self.opts).run()
 
 if __name__ == "__main__":
     unittest.main()
