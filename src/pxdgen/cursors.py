@@ -169,7 +169,7 @@ def block(children: List[CCursor], name: str, header: str, restrict: bool) -> Ge
 class CCursor:
     def __init__(self, cursor: clang.cindex.Cursor):
         self.cursor = cursor
-        self._address = "::".join((self.namespace, self.name)).strip("::")
+        self._address = "::".join((self.location, self.name)).strip("::")
 
     def __iter__(self):
         return self.cursor.get_children()
@@ -238,12 +238,12 @@ class CCursor:
         return self.cursor.displayname
 
     @property
-    def home(self) -> str:
-        return utils.containing_space(self.cursor, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE and not p.is_inline_namespace())
+    def namespace(self) -> str:
+        return utils.get_cursor_namespace(self.cursor)
 
     @property
-    def namespace(self) -> str:
-        return utils.containing_space(self.cursor, lambda p: p.kind in SPACE_KINDS and not p.is_inline_namespace())
+    def location(self) -> str:
+        return utils.get_cursor_location(self.cursor)
 
     @property
     def address(self) -> str:

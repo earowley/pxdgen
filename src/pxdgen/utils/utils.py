@@ -91,6 +91,45 @@ def containing_space(cursor: clang.cindex.Cursor, pred: Callable) -> str:
     return "::".join(parts)
 
 
+def get_cursor_location(cursor: clang.cindex.Cursor) -> str:
+    """
+    Returns the fully qualified C++ location of a cursor.
+    Ex: Baz located in Namespace Foo -> Class Bar (Foo::Bar::Baz)
+    would return Foo::Bar
+
+    @param cursor: The cursor to locate.
+    @return: Fully qualified C++ location as a string.
+    """
+    return containing_space(cursor, lambda parent: parent.kind in SPACE_KINDS and not parent.is_inline_namespace())
+
+
+def get_cursor_namespace(cursor: clang.cindex.Cursor) -> str:
+    """
+    Returns the C++ namespace of a cursor, disregarding
+    parent class/struct types.
+    Ex: Baz located in namespace Foo -> Class Bar (Foo::Bar::Baz)
+    would return Foo
+
+    @param cursor: The cursor to locate.
+    @return: C++ namespace of the cursor.
+    """
+    return containing_space(cursor, lambda parent: parent.kind == clang.cindex.CursorKind.NAMESPACE and not parent.is_inline_namespace())
+
+
+def get_cursor_local_access(cursor: clang.cindex.Cursor) -> str:
+    """
+    Returns the access of a cursor relative to another
+    cursor in the same namespace.
+    Ex: Fuzz located in namespace Foo -> Class Bar -> Class Baz
+    (Foo::Bar::Baz)
+    would return Bar::Baz
+
+    @param cursor: The cursor to access.
+    @return: C++ access string.
+    """
+    return containing_space(cursor, lambda parent: parent.kind != clang.cindex.CursorKind.NAMESPACE)
+
+
 def is_cppclass(cursor: clang.cindex.Cursor) -> bool:
     """
     Given a cursor to a struct/class/class template, returns whether the cursor
@@ -325,9 +364,9 @@ def get_relative_type_name(importer: clang.cindex.Cursor, importee: clang.cindex
     @return: The string following Cython syntax.
     """
     # Absolute location of importer
-    importer_location = containing_space(importer, lambda p: p.kind in SPACE_KINDS and not p.is_inline_namespace())
+    importer_location = get_cursor_location(importer)
     # Absolute location of type being imported
-    importee_location = containing_space(importee, lambda p: p.kind in SPACE_KINDS and not p.is_inline_namespace())
+    importee_location = get_cursor_location(importee)
     # Fully qualified C++ name of type being imported
     importee_addr = f"{importee_location}::{importee.spelling}".strip("::")
 
@@ -347,9 +386,9 @@ def get_relative_type_name(importer: clang.cindex.Cursor, importee: clang.cindex
 
     # The containing namespace, not including classes or other spaces
     # In the pxd output, this resolves to a specific file
-    importer_namespace = containing_space(importer, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE and not p.is_inline_namespace())
-    importee_namespace = containing_space(importee, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE and not p.is_inline_namespace())
-    importee_dot = containing_space(importee, lambda p: p.kind != clang.cindex.CursorKind.NAMESPACE).split("::")[1:]
+    importer_namespace = get_cursor_namespace(importer)
+    importee_namespace = get_cursor_namespace(importee)
+    importee_dot = get_cursor_local_access(importee)
     importee_dot.append(importee.spelling)
 
     # If in the same namespace, we have to access directly or by the containing class
@@ -379,16 +418,16 @@ def get_import_string(importer: clang.cindex.Cursor, importee: clang.cindex.Curs
     for imports which have no namespace to import from.
     @return: The import string following Cython syntax.
     """
-    importer_namespace = containing_space(importer, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE and not p.is_inline_namespace())
-    importee_namespace = containing_space(importee, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE and not p.is_inline_namespace())
-    importee_location = containing_space(importee, lambda p: p.kind in SPACE_KINDS and not p.is_inline_namespace())
+    importer_namespace = get_cursor_namespace(importer)
+    importee_namespace = get_cursor_namespace(importee)
+    importee_location = get_cursor_location(importee)
     importee_addr = f"{importee_location}::{importee.spelling}".strip("::")
 
     # Ignored imports are builtin
     if importee_addr in IGNORED_IMPORTS:
         return None
 
-    importee_dot = containing_space(importee, lambda p: p.kind != clang.cindex.CursorKind.NAMESPACE).split("::")[1:]
+    importee_dot = get_cursor_local_access(importee)
     importee_dot.append(importee.spelling)
 
     # If in the same file, no import required

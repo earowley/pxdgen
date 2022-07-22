@@ -85,6 +85,14 @@ class TestHeaders(unittest.TestCase):
         print(out)
         self.assertEqual(0, rc)
 
+    def test_openssl(self):
+        self.opts.relpath = "./openssl"
+        self.opts.include.append("./openssl")
+
+        self.opts.header = "./openssl/openssl"
+        self.opts.output = "./output/openssl/openssl"
+        PxdGen(self.opts).run()
+
 
 if __name__ == "__main__":
     unittest.main()

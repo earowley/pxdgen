@@ -73,7 +73,7 @@ class PxdGen:
                 exit("Use the `-o` flag to specify an output directory")
 
         if program_options.output and not os.path.isdir(program_options.output):
-            os.mkdir(program_options.output)
+            os.makedirs(program_options.output)
 
         if program_options.libs:
             clang.cindex.Config.set_library_path(program_options.libs)

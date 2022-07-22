@@ -73,12 +73,18 @@ TYPEDEF_KINDS = (
 )
 IGNORED_IMPORTS = {
     "size_t",
-    "ptrdiff_t"
+    "ptrdiff_t",
+    "wchar_t"
 }
 REPLACED_IMPORTS = {
     "std::size_t": "size_t"
 }
 STD_IMPORTS = {
+    "lconv": "libc.locale",
+    "jmp_buf": "libc.setjmp",
+    "sigjmp_buf": "libc.setjmp",
+    "sig_handler_t": "libc.signal",
+    "sig_atomic_t": "libc.signal",
     "int8_t": "libc.stdint",
     "int16_t": "libc.stdint",
     "int32_t": "libc.stdint",
@@ -93,8 +99,12 @@ STD_IMPORTS = {
     "uintmax_t": "libc.stdint",
     "FILE": "libc.stdio",
     "fpos_t": "libc.stdio",
+    "div_t": "libc.stdlib",
+    "ldiv_t": "libc.stdlib",
+    "lldiv_t": "libc.stdlib",
     "clock_t": "libc.time",
     "time_t": "libc.time",
+    "tm": "libc.time",
     "std::complex": "libcpp.complex",
     "std::deque": "libcpp.deque",
     "std::list": "libcpp.list",
