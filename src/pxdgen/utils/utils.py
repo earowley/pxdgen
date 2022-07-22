@@ -24,6 +24,7 @@ def find_namespaces(cursor: clang.cindex.Cursor, valid_headers: set, recursive: 
                     **kwargs) -> Dict[str, List[clang.cindex.Cursor]]:
     """
     Finds namespaces, given the top-level cursor of a header file.
+
     @param cursor: Clang Cursor.
     @param valid_headers: Header whitelist set for filtering.
     @param recursive: Use all namespaces, rather than just the ones in valid_headers.
@@ -36,17 +37,17 @@ def find_namespaces(cursor: clang.cindex.Cursor, valid_headers: set, recursive: 
 
     def _update(d1, d2):
         for key in d2:
-            l = d1.get(key, None)
-            if l is None:
-                l = list()
-                d1[key] = l
-
-            l += d2[key]
+            ns_list = d1.get(key)
+            if ns_list is None:
+                ns_list = list()
+                d1[key] = ns_list
+            ns_list += d2[key]
 
     ret = dict()
     namespaces = list()
     curr_name = kwargs.get("curr_name", '')
 
+    # Add all namespaces under the current cursor
     for child in cursor.get_children():
         if child.location.file is None:
             continue
@@ -57,9 +58,11 @@ def find_namespaces(cursor: clang.cindex.Cursor, valid_headers: set, recursive: 
         if add_cond:
             namespaces.append(child)
 
+    # Recursively process the namespaces added above
     for namespace in namespaces:
         _update(ret, find_namespaces(namespace, valid_headers, recursive, curr_name=curr_name + "::" + namespace.spelling))
 
+    # Add self, if needed
     if cursor.kind in SPACE_KINDS:
         _update(ret, {curr_name.strip("::"): [cursor]})
 
@@ -96,6 +99,7 @@ def is_cppclass(cursor: clang.cindex.Cursor) -> bool:
     @param cursor: Clang Cursor.
     @return: Boolean.
     """
+    # Handle trivial cases where Clang does the heavy lifting
     if cursor.kind not in STRUCTURED_DATA_KINDS:
         return False
     if cursor.kind in (
@@ -104,10 +108,11 @@ def is_cppclass(cursor: clang.cindex.Cursor) -> bool:
     ):
         return True
 
-    # There can be anonymous structs and enumerations as fields
+    # C++ struct decl that is not C-compliant
     for child in cursor.get_children():
         if child.kind == clang.cindex.CursorKind.FIELD_DECL:
             continue
+        # There can be anonymous structs and enumerations as fields
         if child.kind in ANON_KINDS and child.is_anonymous():
             continue
         return True
@@ -241,7 +246,7 @@ def is_function_pointer(ctype: clang.cindex.Type) -> bool:
 
 def get_function_pointer_return_type(ctype: clang.cindex.Type) -> clang.cindex.Type:
     """
-    Gets the return type of a function pointer or prototype.
+    Gets the return-type of a function pointer or prototype.
     Type is not validated, use is_function_pointer to validate.
 
     @param ctype: Clang Type object.
@@ -319,32 +324,45 @@ def get_relative_type_name(importer: clang.cindex.Cursor, importee: clang.cindex
     @param importee: The imported type declaration.
     @return: The string following Cython syntax.
     """
-    importer_space = containing_space(importer, lambda p: p.kind in SPACE_KINDS and not p.is_inline_namespace())
-    importee_space = containing_space(importee, lambda p: p.kind in SPACE_KINDS and not p.is_inline_namespace())
-    addr = f"{importee_space}::{importee.spelling}".strip("::")
+    # Absolute location of importer
+    importer_location = containing_space(importer, lambda p: p.kind in SPACE_KINDS and not p.is_inline_namespace())
+    # Absolute location of type being imported
+    importee_location = containing_space(importee, lambda p: p.kind in SPACE_KINDS and not p.is_inline_namespace())
+    # Fully qualified C++ name of type being imported
+    importee_addr = f"{importee_location}::{importee.spelling}".strip("::")
 
-    if importer_space == importee_space or addr in IGNORED_IMPORTS:
+    # If the location is equal, the imported type can be referred to directly
+    # If ignored, just return
+    if importer_location == importee_location or importee_addr in IGNORED_IMPORTS:
         return importee.spelling
-    if addr in REPLACED_IMPORTS:
-        return REPLACED_IMPORTS[addr]
-    if addr in STD_IMPORTS:
-        return addr.replace("::", '_')
-    if not importee_space:
+    # Convenient replacements for special types
+    if importee_addr in REPLACED_IMPORTS:
+        return REPLACED_IMPORTS[importee_addr]
+    # Special handling of libc/libcpp imports that are already defined
+    if importee_addr in STD_IMPORTS:
+        return importee_addr.replace("::", '_')
+    # Top-level namespace, do not process further
+    if not importee_location:
         return importee.spelling
 
-    importer_home = containing_space(importer, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE and not p.is_inline_namespace())
-    importee_home = containing_space(importee, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE and not p.is_inline_namespace())
+    # The containing namespace, not including classes or other spaces
+    # In the pxd output, this resolves to a specific file
+    importer_namespace = containing_space(importer, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE and not p.is_inline_namespace())
+    importee_namespace = containing_space(importee, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE and not p.is_inline_namespace())
     importee_dot = containing_space(importee, lambda p: p.kind != clang.cindex.CursorKind.NAMESPACE).split("::")[1:]
     importee_dot.append(importee.spelling)
 
-    if importer_home == importee_home:
-        # If importee is toplevel, it is visible from everywhere in the namespace
-        if importee_home == importee_space:
+    # If in the same namespace, we have to access directly or by the containing class
+    if importer_namespace == importee_namespace:
+        # Not in a class, access directly
+        if importee_namespace == importee_location:
             return importee.spelling
+        # Create the spelling of class-access
         return '.'.join(importee_dot)
+    # Not in the same namespace, use the full reference
     else:
         return (
-            importee_home.replace("::", '_') +
+            importee_namespace.replace("::", '_') +
             '_' + '.'.join(importee_dot)
         )
 
@@ -356,52 +374,56 @@ def get_import_string(importer: clang.cindex.Cursor, importee: clang.cindex.Curs
     @param importer: The reference type declaration.
     @param importee: The imported type declaration.
     @param import_same_space: Whether types from the
+    same namespace should be imported (from separate file).
     @param default: If provided, it serves as an override
     for imports which have no namespace to import from.
-    same namespace should be imported (from separate file).
     @return: The import string following Cython syntax.
     """
-    importer_home = containing_space(importer, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE and not p.is_inline_namespace())
-    importee_home = containing_space(importee, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE and not p.is_inline_namespace())
-    importee_space = containing_space(importee, lambda p: p.kind in SPACE_KINDS and not p.is_inline_namespace())
-    addr = f"{importee_space}::{importee.spelling}".strip("::")
+    importer_namespace = containing_space(importer, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE and not p.is_inline_namespace())
+    importee_namespace = containing_space(importee, lambda p: p.kind == clang.cindex.CursorKind.NAMESPACE and not p.is_inline_namespace())
+    importee_location = containing_space(importee, lambda p: p.kind in SPACE_KINDS and not p.is_inline_namespace())
+    importee_addr = f"{importee_location}::{importee.spelling}".strip("::")
 
-    if addr in IGNORED_IMPORTS:
+    # Ignored imports are builtin
+    if importee_addr in IGNORED_IMPORTS:
         return None
 
     importee_dot = containing_space(importee, lambda p: p.kind != clang.cindex.CursorKind.NAMESPACE).split("::")[1:]
     importee_dot.append(importee.spelling)
 
-    if importer_home == importee_home:
+    # If in the same file, no import required
+    if importer_namespace == importee_namespace:
         if not import_same_space:
             return None
 
         importer_file = importer.location.file
         importee_file = importee.location.file
 
+        # Same file, no import required
         if importer_file is None or importee_file is None:
             return None
         if importer_file.name == importee_file.name:
             return None
 
-        importee_home = importee_home or os.path.splitext(os.path.basename(importee_file.name))[0]
+        # If "C-style" and not in C++ namespace, declarations are placed in filename.pxd in output directory
+        importee_namespace = importee_namespace or os.path.splitext(os.path.basename(importee_file.name))[0]
 
-        return f"from {importee_home.replace('::', '.')} cimport {importee_dot[0]}"
+        return f"from {importee_namespace.replace('::', '.')} cimport {importee_dot[0]}"
 
-    if not importee_home:
+    if not importee_namespace:
         importee_file = importee.location.file
 
         if importee_file is None:
             return None
 
-        importee_home = default or os.path.splitext(os.path.basename(importee_file.name))[0]
+        importee_namespace = default or os.path.splitext(os.path.basename(importee_file.name))[0]
 
-        return f"from {importee_home} cimport {importee_dot[0]}"
+        return f"from {importee_namespace} cimport {importee_dot[0]}"
 
     return "from {} cimport {} as {}".format(
-        importee_home.replace('::', '.'),
+        importee_namespace.replace('::', '.'),
         importee_dot[0],
-        importee_home.replace('::', '_') + '_' + importee_dot[0]
+        importee_namespace.replace('::', '_') + '_' + importee_dot[0]
     )
 
 
@@ -418,12 +440,12 @@ def full_type_repr(ctype: clang.cindex.Type, ref_cursor: clang.cindex.Cursor) ->
     Case foo::bar, where ref_cursor == foo
     Returns: bar
     """
-    EXPANDABLE = (
+    expandable = (
         clang.cindex.TypeKind.ELABORATED,
         clang.cindex.TypeKind.UNEXPOSED
     )
 
-    EXPANDABLE_CURSORS = (
+    expandable_cursors = (
         clang.cindex.CursorKind.CLASS_DECL,
         clang.cindex.CursorKind.CLASS_TEMPLATE,
         clang.cindex.CursorKind.STRUCT_DECL
@@ -463,8 +485,8 @@ def full_type_repr(ctype: clang.cindex.Type, ref_cursor: clang.cindex.Cursor) ->
     nargs = ctype.get_num_template_arguments()
 
     if (
-        ctype.kind not in EXPANDABLE or
-        ctype.get_declaration().kind not in EXPANDABLE_CURSORS or
+        ctype.kind not in expandable or
+        ctype.get_declaration().kind not in expandable_cursors or
         nargs <= 0
     ):
         return finalize(ctype)
@@ -597,9 +619,9 @@ def strip_beg_type_ids(s: str) -> str:
     @param s: Type string to strip.
     @return: Stripped type string.
     """
-    IDS = ("struct ", "enum ", "union ")
+    ids = ("struct ", "enum ", "union ")
 
-    for i in IDS:
+    for i in ids:
         if s.find(i) == 0:
             return s[len(i):]
         #  const params
@@ -619,13 +641,13 @@ def convert_dialect(s: str) -> str:
     @param s: String to convert
     @return: Converted string
     """
-    THROWS = "throw("
+    throws = "throw("
 
     # First templates
     ret = s.replace('<', '[').replace('>', ']')
 
     # Replace exception information
-    tloc = ret.find(THROWS)
+    tloc = ret.find(throws)
     if tloc != -1:
         eb = ret.index(')', tloc)
         ret = ret.replace(ret[tloc:eb+1], "except +")

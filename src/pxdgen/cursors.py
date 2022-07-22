@@ -270,6 +270,11 @@ class CCursor:
 
         @return: bool.
         """
+        unsupported_types = (clang.cindex.TypeKind.BLOCKPOINTER,)
+
+        if self.cursor.type.kind in unsupported_types:
+            return True
+
         for child in self.cursor.get_children():
             if child.kind in TYPE_REFS:
                 d = child.get_definition() or child.type.get_declaration()
@@ -514,8 +519,13 @@ class Function(CCursor):
 
         for i in range(n, len(self._args) + 1):
             args = self._argument_declarations(i)
+            prefix = "#  " if comment else ''
 
-            yield ("#  " if comment else '') + f"{restype} {self.name}{self._tmpl_params}({', '.join(args)})"
+            if utils.is_function_pointer(self.cursor.result_type):
+                i = restype.index(')')
+                yield f"{prefix}{restype[:i]}{self.name}{self._tmpl_params}({', '.join(args)}){restype[i:]}"
+            else:
+                yield f"{prefix}{restype} {self.name}{self._tmpl_params}({', '.join(args)})"
 
     def _argument_declarations(self, nargs: int) -> Generator[str, None, None]:
         """
@@ -898,6 +908,7 @@ class Namespace:
         The Cython header for this namespace.
 
         @param rel_header_path: Header path relative to the C compiler's include path.
+        @param system_header: Whether angled brackets should be added to the header name.
         @return: The Cythonized header for this namespace.
         """
         header_name = rel_header_path.replace(os.path.sep, '/')

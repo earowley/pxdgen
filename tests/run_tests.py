@@ -17,9 +17,9 @@ def foo():
 """
 
 
-def cythonize(base: str, imports: List[str], use_cpp: bool = False) -> Tuple[int, str]:
+def cythonize(base: str, imports: List[Tuple[str, List[str]]], use_cpp: bool = False) -> Tuple[int, str]:
     save = getcwd()
-    imports = '\n'.join(f"from {i} cimport *" for i in imports)
+    imports = '\n'.join(f"from {pxd} cimport {', '.join(values)}" for pxd, values in imports)
     cython = TEST_CODE.format(imports)
     chdir(join('.', "output", base))
 
@@ -27,12 +27,10 @@ def cythonize(base: str, imports: List[str], use_cpp: bool = False) -> Tuple[int
         cython = "# distutils: language = c++\n\n" + cython
 
     try:
-        with open("test.pyx", 'w') as file:
+        with open("unittest.pyx", 'w') as file:
             file.write(cython)
         return getstatusoutput("cythonize test.pyx --3str")
     finally:
-        if isfile("test.pyx"):
-            unlink("test.pyx")
         if isfile("test.c"):
             unlink("test.c")
         chdir(save)
@@ -61,7 +59,7 @@ class TestHeaders(unittest.TestCase):
         self.opts.language = "c++"
         self.opts.flags.append("defines")
         PxdGen(self.opts).run()
-        rc, out = cythonize("cplusplus", ["Foo", "Bar", "Bar.Baz"], True)
+        rc, out = cythonize("cplusplus", [("Foo", ["A", "Action", "SizedRef"]), ("Bar", ["BarInt"]), ("Bar.Baz", ["get_dataset"])], True)
         print(out)
         self.assertEqual(0, rc)
 
@@ -72,18 +70,18 @@ class TestHeaders(unittest.TestCase):
         self.opts.output = "./output/gzip"
         self.opts.language = "c++"
         PxdGen(self.opts).run()
-        rc, out = cythonize("gzip", ["gzip"], True)
+        rc, out = cythonize("gzip", [("gzip", ["Compressor", "Decompressor", "is_compressed"])], True)
         print(out)
         self.assertEqual(0, rc)
 
     def test_cxml(self):
         self.opts.relpath = "./cxml"
         self.opts.include.append("./cxml")
-        self.opts.header = "./cxml/cxml/cxml.h"
+        self.opts.header = "./cxml"
         self.opts.output = "./output/cxml"
-        self.opts.recursive = True
+        # self.opts.recursive = True
         PxdGen(self.opts).run()
-        rc, out = cythonize("cxml", ["cxml"])
+        rc, out = cythonize("cxml", [("cxml", ["cxml_parse_xml"])])
         print(out)
         self.assertEqual(0, rc)
 

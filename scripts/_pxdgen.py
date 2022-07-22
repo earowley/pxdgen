@@ -118,6 +118,7 @@ class PxdGen:
 
         to_parse = list()
 
+        # Get the headers to parse
         if self.file_mode:
             to_parse.append(os.path.abspath(self.opts.header))
         elif self.dir_mode:
@@ -134,6 +135,9 @@ class PxdGen:
                 px_log(h)
             px_log()
 
+        # Context which contains a mapping of namespace->IOStream
+        # The IOStream has the text for the __init__.pxd of each
+        # namespace
         ctx = dict()
         parse_opts = clang.cindex.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD if FLAG_PARSE_DEFINES in self.flags else 0
 
@@ -153,7 +157,9 @@ class PxdGen:
                     if FLAG_ERROR_EXIT in self.flags:
                         exit()
 
+            # Find the namespaces for the current file, and its associated cursors
             namespaces = utils.find_namespaces(tu.cursor, valid_headers, self.opts.recursive)
+            # The C "top-level" namespace
             namespaces[''] = [tu.cursor]
 
             for space_name, cursors in namespaces.items():
@@ -217,6 +223,11 @@ class PxdGen:
 
         if self.opts.output:
             for space_name in ctx:
+                # For C "top-level", do not use __init__.pxd, because
+                # The output directory is intended to be added to pxd
+                # path
+                if not space_name:
+                    continue
                 out_path = os.path.join(self.opts.output, space_name.replace("::", os.path.sep))
 
                 with open(os.path.join(out_path, "__init__.pxd"), 'w') as out:
