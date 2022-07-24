@@ -40,5 +40,9 @@ setup(
     description="A tool for converting one or more C/C++ headers to Cython pxd files.",
     long_description=long_d,
     long_description_content_type="text/markdown",
+    install_requires=[
+        "clang",
+        "colorama"
+    ],
     python_requires="~=3.6"
 )
