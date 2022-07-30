@@ -126,6 +126,7 @@ class PxdGen:
                 for header in glob.glob(os.path.join(self.opts.header, glob_term), recursive=True):
                     to_parse.append(os.path.abspath(header))
 
+        # Start the valid headers as what was specified
         valid_headers = set(to_parse)
 
         if self.opts.verbose:
@@ -134,6 +135,11 @@ class PxdGen:
             for h in valid_headers:
                 px_log(h)
             px_log()
+
+        # Handle whitelist
+        if self.opts.recursive and self.opts.whitelist:
+            for w in self.opts.whitelist:
+                valid_headers |= set(os.path.abspath(f) for f in glob.glob(w, recursive=True))
 
         # Context which contains a mapping of namespace->IOStream
         # The IOStream has the text for the __init__.pxd of each
@@ -163,7 +169,7 @@ class PxdGen:
             namespaces[''] = [tu.cursor]
 
             for space_name, cursors in namespaces.items():
-                pxspace = Namespace(cursors, self.opts.recursive, file, valid_headers)
+                pxspace = Namespace(cursors, self.opts.recursive, len(self.opts.whitelist) > 0, file, valid_headers)
 
                 if not pxspace.has_declarations:
                     continue
@@ -252,6 +258,11 @@ def main():
     argp.add_argument("-r", "--recursive",
                       action="store_true",
                       help="Include declarations from all nested headers")
+    argp.add_argument("-w", "--whitelist-add",
+                      action="append",
+                      dest="whitelist",
+                      default=[],
+                      help="Add to a whitelist to tune the recursive option")
     argp.add_argument("-x", "--language",
                       help="Force Clang to use the specified language for interpretation")
     argp.add_argument("-I", "--include",

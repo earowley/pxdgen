@@ -142,6 +142,7 @@ cython_debug/
 # Testing
 tests/output/
 tests/openssl/
+tests/eigen/
 
 # Other
 .DS_Store

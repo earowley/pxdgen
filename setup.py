@@ -23,7 +23,7 @@ with open("./README.md", 'r') as file:
 
 setup(
     name="pxdgen",
-    version="1.1.0",
+    version="1.1.1",
     url="https://github.com/earowley/pxdgen",
     py_modules=["_pxdgen"],
     packages=["pxdgen", "pxdgen.utils"],

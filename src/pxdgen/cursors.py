@@ -831,12 +831,13 @@ class Struct(CCursor):
 
 
 class Namespace:
-    def __init__(self, cursors: list, recursive: bool, main_header: str,  valid_headers: set, *_):
+    def __init__(self, cursors: list, recursive: bool, use_whitelist: bool, main_header: str,  valid_headers: set, *_):
         """
         Represents a Cython namespace declaration, given the following parameters.
 
         @param cursors: A list of cursors associated with this namespace.
         @param recursive: Whether this namespace should declare children from other headers, recursively.
+        @param use_whitelist: Whether to use the whitelist feature of recursive parsing.
         @param main_header: The header file to accept declarations from.
         @param valid_headers: The set of headers being parsed.
         """
@@ -846,6 +847,7 @@ class Namespace:
         self.main_header = main_header
         self.valid_headers = valid_headers
         self.children = list()
+        self.use_whitelist = use_whitelist
         self.class_space = all(utils.is_cppclass(c) for c in cursors)
 
         for cursor in self.cursors:
@@ -946,8 +948,13 @@ class Namespace:
                     if not include_all:
                         continue
 
+                if self.recursive and self.use_whitelist:
+                    packed = t.file in self.valid_headers
+                else:
+                    packed = self.recursive
+
                 default = os.path.splitext(os.path.basename(self.main_header))[0] if self.recursive else None
-                res = utils.get_import_string(child, t.cursor, not self.recursive, default)
+                res = utils.get_import_string(child, t.cursor, packed, default)
 
                 if res is not None:
                     result.add(res)
@@ -967,9 +974,11 @@ class Namespace:
         if type(specialize(child)) is CCursor:
             return False
         try:
+            file_name = os.path.abspath(child.location.file.name)
             return (
-                self.recursive or
-                os.path.abspath(child.location.file.name) == self.main_header
+                self.recursive and not self.use_whitelist or
+                self.recursive and self.use_whitelist and file_name in self.valid_headers or
+                file_name == self.main_header
             )
         except AttributeError:
             return False

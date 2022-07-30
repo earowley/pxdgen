@@ -51,6 +51,7 @@ class TestHeaders(unittest.TestCase):
         opts.libs = cfg["Clang"]["library"]
         opts.verbose = True
         opts.flags = []
+        opts.whitelist = []
         self.opts = opts
 
     def test_basic_cplusplus(self):
@@ -77,9 +78,10 @@ class TestHeaders(unittest.TestCase):
     def test_cxml(self):
         self.opts.relpath = "./cxml"
         self.opts.include.append("./cxml")
-        self.opts.header = "./cxml"
+        self.opts.header = "./cxml/cxml/cxml.h"
         self.opts.output = "./output/cxml"
-        # self.opts.recursive = True
+        self.opts.recursive = True
+        self.opts.whitelist.append("./cxml/**/*")
         PxdGen(self.opts).run()
         rc, out = cythonize("cxml", [("cxml", ["cxml_parse_xml"])])
         print(out)
@@ -100,6 +102,17 @@ class TestHeaders(unittest.TestCase):
         self.opts.header = "./openssl/crypto"
         self.opts.output = "./output/openssl/crypto"
         PxdGen(self.opts).run()
+
+    def test_eigen(self):
+        self.opts.relpath = "./eigen"
+        self.opts.include.append("./eigen")
+        self.opts.header = "./eigen/Jacobi"
+        self.opts.output = "./output/eigen"
+        self.opts.recursive = True
+        self.opts.language = "c++"
+        self.opts.whitelist.append("./eigen/src/Jacobi/*")
+        PxdGen(self.opts).run()
+
 
 if __name__ == "__main__":
     unittest.main()

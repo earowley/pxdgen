@@ -406,14 +406,15 @@ def get_relative_type_name(importer: clang.cindex.Cursor, importee: clang.cindex
         )
 
 
-def get_import_string(importer: clang.cindex.Cursor, importee: clang.cindex.Cursor, import_same_space: bool, default: Optional[str]) -> Optional[str]:
+def get_import_string(importer: clang.cindex.Cursor, importee: clang.cindex.Cursor, packed: bool, default: Optional[str]) -> Optional[str]:
     """
     Calculates an import string given two reference cursors.
 
     @param importer: The reference type declaration.
     @param importee: The imported type declaration.
-    @param import_same_space: Whether types from the
-    same namespace should be imported (from separate file).
+    @param packed: Whether imports in the same namespace
+    and different headers are being "packed" into the
+    same pxd.
     @param default: If provided, it serves as an override
     for imports which have no namespace to import from.
     @return: The import string following Cython syntax.
@@ -430,9 +431,10 @@ def get_import_string(importer: clang.cindex.Cursor, importee: clang.cindex.Curs
     importee_dot = get_cursor_local_access(importee).split("::")[1:]
     importee_dot.append(importee.spelling)
 
-    # If in the same file, no import required
+    # If in the same namespace, these are potentially in the same
+    # file, in which case no import is required.
     if importer_namespace == importee_namespace:
-        if not import_same_space:
+        if packed:
             return None
 
         importer_file = importer.location.file
