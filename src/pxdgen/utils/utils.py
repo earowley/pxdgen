@@ -149,11 +149,16 @@ def is_cppclass(cursor: clang.cindex.Cursor) -> bool:
 
     # C++ struct decl that is not C-compliant
     for child in cursor.get_children():
+        # C allows fields
         if child.kind == clang.cindex.CursorKind.FIELD_DECL:
             continue
         # There can be anonymous structs and enumerations as fields
         if child.kind in ANON_KINDS and child.is_anonymous():
             continue
+        # Make sure common attributes do not convert to C++ class
+        if child.kind in STRUCT_ATTR_KINDS:
+            continue
+
         return True
 
     return False

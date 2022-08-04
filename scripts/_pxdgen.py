@@ -185,7 +185,7 @@ class PxdGen:
                     if len(fwd_decls):
                         for line in block(fwd_decls, "toplevel", "cdef extern from *:", False):
                             fwd.writeline(line)
-                elif self.opts.output or not self.opts.recursive:
+                elif self.opts.output or not self.opts.recursive or self.opts.recursive and self.opts.whitelist:
                     for i in pxspace.import_strings(FLAG_IMPORT_ALL in self.flags or self.opts.recursive):
                         imports.add(i)
 

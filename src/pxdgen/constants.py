@@ -22,8 +22,9 @@ TAB_LENGTH = 4
 TAB = ' ' * TAB_LENGTH
 RE_DECLTYPE = re.compile("decltype\(.+\)")
 RE_CPP_INCLUDE = re.compile(" *#include *[<\"].+\.h(pp)?[>\"] *")
-RE_CPP_INT = re.compile("\d{1,20}")
-RE_CPP_FLOAT = re.compile("\d+(\.\d+)?[fF]?")
+RE_CPP_INT = re.compile("-?\d{1,20}[uU]?")
+RE_CPP_HEX = re.compile("-?0[xX][0-9A-Fa-f]+[uU]?")
+RE_CPP_FLOAT = re.compile("-?\d+(\.\d+)?[fF]?")
 
 SPACE_KINDS = (
     kinds.STRUCT_DECL,
@@ -63,6 +64,12 @@ ANON_KINDS = STRUCTURED_DATA_KINDS + (
     kinds.ENUM_DECL,
     kinds.UNION_DECL
 )
+STRUCT_ATTR_KINDS = (
+    kinds.ALIGNED_ATTR,
+    kinds.PACKED_ATTR,
+    kinds.WARN_UNUSED_ATTR,
+    kinds.VISIBILITY_ATTR
+)
 TYPE_REFS = (
     kinds.TYPE_REF,
     kinds.TEMPLATE_REF
@@ -85,6 +92,7 @@ STD_IMPORTS = {
     "sigjmp_buf": "libc.setjmp",
     "sig_handler_t": "libc.signal",
     "sig_atomic_t": "libc.signal",
+    "wchar_t": "libc.stddef",
     "int8_t": "libc.stdint",
     "int16_t": "libc.stdint",
     "int32_t": "libc.stdint",

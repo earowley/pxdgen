@@ -413,18 +413,30 @@ class Macro(CCursor):
         super().__init__(cursor)
 
     def lines(self, **kwargs) -> Generator[str, None, None]:
+        """
+        The lines for this macro definition.
+
+        @param kwargs: Optional keyword arguments.
+        @return: Generator[str]
+        """
         macro_type = "const int"
         tokens = [t.spelling for t in self.cursor.get_tokens()]
         func = self.cursor.is_macro_function()
         i = 1 if not func else (tokens.index(')') + 1)
         macro_def = ''.join(tokens[i:])
+        eq = True
 
         if re.fullmatch(RE_CPP_INT, macro_def):
             macro_type = "const long"
+        elif re.fullmatch(RE_CPP_HEX, macro_def):
+            macro_type = "const unsigned long"
         elif re.fullmatch(RE_CPP_FLOAT, macro_def):
             macro_type = "const double"
+            macro_def = macro_def.strip("fF")
+        else:
+            eq = False
 
-        yield f"{macro_type} {tokens[0]}{'(...)' if func else ''}"
+        yield f"{macro_type} {tokens[0]}{'(...)' if func else f' = {macro_def}' if eq else ''}"
 
 
 class Function(CCursor):
