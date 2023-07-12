@@ -1,6 +1,6 @@
 import unittest
 from os import chdir, getcwd, unlink
-from os.path import join, isfile
+from os.path import join, isfile, pathsep
 from argparse import Namespace
 from subprocess import getstatusoutput
 from configparser import ConfigParser
@@ -40,14 +40,13 @@ class TestHeaders(unittest.TestCase):
     def setUp(self):
         cfg = ConfigParser()
         cfg.read("configuration.ini")
-        print(cfg["Clang"]["include"])
         opts = Namespace()
         opts.header = ''
         opts.output = ''
         opts.relpath = ""
         opts.recursive = False
         opts.language = ''
-        opts.include = [cfg["Clang"]["include"]]
+        opts.include = [p for p in cfg["Clang"]["include"].split(pathsep)]
         opts.libs = cfg["Clang"]["library"]
         opts.verbose = True
         opts.flags = []
@@ -60,7 +59,10 @@ class TestHeaders(unittest.TestCase):
         self.opts.language = "c++"
         self.opts.flags.append("defines")
         PxdGen(self.opts).run()
-        rc, out = cythonize("cplusplus", [("Foo", ["A", "Action", "SizedRef"]), ("Bar", ["BarInt"]), ("Bar.Baz", ["get_dataset"])], True)
+        rc, out = cythonize("cplusplus",
+                            [("Foo", ["A", "Action", "SizedRef"]),
+                             ("Bar", ["BarInt"]),
+                             ("Bar.Baz", ["get_dataset"])], True)
         print(out)
         self.assertEqual(0, rc)
 

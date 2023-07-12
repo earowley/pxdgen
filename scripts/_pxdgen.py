@@ -23,7 +23,6 @@ import clang.cindex
 import pxdgen.utils as utils
 from pxdgen.utils import TabWriter
 from pxdgen.cursors import Namespace, block
-from pxdgen.extensions import load_extensions
 from colorama import Fore, Style, init as colorama_init
 colorama_init()
 
@@ -84,7 +83,7 @@ class PxdGen:
             msg = str(e)
 
             if "set_library_path" in msg:
-                exit("Unable to find libclang.so. Specify the path to PxdGen with `-L`")
+                exit("Unable to find libclang.[so|dylib|dll]. Specify the path to PxdGen with `-L`")
 
             exit(msg)
 
@@ -105,6 +104,7 @@ class PxdGen:
         self.relpath = relpath
         self.flags = set(program_options.flags)
 
+        from pxdgen.extensions import load_extensions
         load_extensions()
 
     def run(self):
